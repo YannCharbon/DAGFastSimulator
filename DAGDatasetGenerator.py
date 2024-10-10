@@ -9,6 +9,8 @@ import multiprocessing
 import time
 import datetime
 import concurrent.futures
+import math
+import os
 
 """ How to use
 from DAGDatasetGenerator import DAGDatasetGenerator
@@ -52,6 +54,27 @@ class DAGDatasetGenerator:
 
 
         return
+
+    """
+    Run the simulation in parallel
+    """ 
+    def run_parallel(self, n, count, max_workers=os.cpu_count()):
+        start_time = time.time()
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.run_once, n) for i in range(count)}
+            i = 0
+            filename = "topologies_perf_{}.txt".format(datetime.datetime.now()).replace(":", "_")
+            f = open(filename, "a")
+            for future in concurrent.futures.as_completed(futures):
+                best_dag, best_perf, adj_matrix = future.result()
+                futures.remove(future)
+                i += 1
+                print(f"End of run : {i}")
+                f.write(str((adj_matrix, best_dag.edges())) + '\n')
+            f.close()
+
+        end_time = time.time()
+        print(f"Total runtime : {end_time - start_time}")
 
     """
     Runs the simulation for one random topology of size n by n
@@ -173,12 +196,45 @@ class DAGDatasetGenerator:
             for edge in edges:
                 tree_matrix[edge[0]][edge[1]] = 1
                 tree_matrix[edge[1]][edge[0]] = 1
-
             # Check if the selected edges form a connected tree
             visited = [False] * num_nodes
             tree_edges = []
             dfs_tree(tree_matrix, visited, 0, tree_edges)
+            if len(tree_edges) == num_nodes - 1 and all(visited):
+                all_possible_trees.append(tree_edges)
 
+        digraphs = []
+        for tree_edges in all_possible_trees:
+            G = nx.DiGraph()
+            G.add_edges_from(tree_edges)
+            digraphs.append(G)
+        return digraphs
+
+    def generate_subset_dags(self, adj_matrix, ratio=0.2):
+        nodes = list(range(len(adj_matrix)))
+        all_edges = [(i, j) for i in range(len(adj_matrix)) for j in range(i+1, len(adj_matrix)) if adj_matrix[i][j] > 0]
+        num_nodes = len(nodes)
+        all_possible_trees = []
+
+        def dfs_tree(adj_matrix, visited, current_node, tree_edges):
+            visited[current_node] = True
+            for neighbor in range(len(adj_matrix)):
+                if adj_matrix[current_node][neighbor] > 0 and not visited[neighbor]:
+                    tree_edges.append((current_node, neighbor))
+                    dfs_tree(adj_matrix, visited, neighbor, tree_edges)
+
+        # Generate subset combinations of edges that can form a tree (n-1 edges)
+        rng = np.random.default_rng()
+        all_comb = list(combinations(all_edges, num_nodes - 1))
+        for edges in rng.choice(all_comb, math.ceil(len(all_comb) * ratio)):
+            tree_matrix = np.zeros_like(adj_matrix)
+            for edge in edges:
+                tree_matrix[edge[0]][edge[1]] = 1
+                tree_matrix[edge[1]][edge[0]] = 1
+            # Check if the selected edges form a connected tree
+            visited = [False] * num_nodes
+            tree_edges = []
+            dfs_tree(tree_matrix, visited, 0, tree_edges)
             if len(tree_edges) == num_nodes - 1 and all(visited):
                 all_possible_trees.append(tree_edges)
 
@@ -491,18 +547,3 @@ class DAGDatasetGenerator:
         print("Computing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
 
         return best_dag, best_perf
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
