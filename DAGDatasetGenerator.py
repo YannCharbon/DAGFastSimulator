@@ -76,21 +76,6 @@ class DAGDatasetGenerator:
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
     
-    def run_parallel_cython(self, n, count, max_workers=os.cpu_count()):
-        start_time = time.time()
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self.run_once_cython, n) for i in range(count)}
-            filename = "topologies_perf_{}.txt".format(datetime.datetime.now()).replace(":", "_")
-            f = open(filename, "a")
-            for future in concurrent.futures.as_completed(futures):
-                best_dag, best_perf, adj_matrix = future.result()
-                futures.remove(future)
-                f.write(str((adj_matrix, best_dag.edges())) + '\n')
-            f.close()
-
-        end_time = time.time()
-        print(f"Total runtime : {end_time - start_time}")
-
     """
     Runs the simulation for one random topology of size n by n
     """
@@ -108,24 +93,6 @@ class DAGDatasetGenerator:
 
         # Compute the best performing DAG within the topology
         best_dag, best_perf = self.get_best_dag_parallel_up_down(dags, adj_matrix)
-        print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
-
-        return best_dag, best_perf, adj_matrix
-
-    def run_once_cython(self, n):
-        dags = []
-        adj_matrix = []
-        while (len(dags) == 0):
-            # Generate a random adjacency matrix
-            adj_matrix, density_factor = self.generate_random_adj_matrix(n)
-            print("Density factor = {}".format(density_factor))
-
-            # Get all the possible DAGs within this topology
-            dags = self.generate_dags(adj_matrix)
-            print(f"Number of DAGs generated: {len(dags)}")
-
-        # Compute the best performing DAG within the topology
-        best_dag, best_perf = self.cython_get_best_dag_parallel_up_down(dags, adj_matrix)
         print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
 
         return best_dag, best_perf, adj_matrix
