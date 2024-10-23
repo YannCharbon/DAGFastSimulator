@@ -2,3 +2,6 @@ env/
 __pycache__
 *.txt
 !requirements.txt
+# Cython build related
+build/
+*.so

@@ -11,7 +11,9 @@ import datetime
 import concurrent.futures
 import math
 import os
-
+import CythonDAGOperation 
+import copy
+import cProfile
 """ How to use
 from DAGDatasetGenerator import DAGDatasetGenerator
 
@@ -61,15 +63,28 @@ class DAGDatasetGenerator:
     def run_parallel(self, n, count, max_workers=os.cpu_count()):
         start_time = time.time()
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self.run_once, n) for i in range(count)}
-            i = 0
+            #futures = {executor.submit(self.run_once, n) for i in range(count)}
+            futures = {executor.submit(self.run_once_with_adaptive_steps, n) for i in range(count)}
             filename = "topologies_perf_{}.txt".format(datetime.datetime.now()).replace(":", "_")
             f = open(filename, "a")
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
                 futures.remove(future)
-                i += 1
-                print(f"End of run : {i}")
+                f.write(str((adj_matrix, best_dag.edges())) + '\n')
+            f.close()
+
+        end_time = time.time()
+        print(f"Total runtime : {end_time - start_time}")
+    
+    def run_parallel_cython(self, n, count, max_workers=os.cpu_count()):
+        start_time = time.time()
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.run_once_cython, n) for i in range(count)}
+            filename = "topologies_perf_{}.txt".format(datetime.datetime.now()).replace(":", "_")
+            f = open(filename, "a")
+            for future in concurrent.futures.as_completed(futures):
+                best_dag, best_perf, adj_matrix = future.result()
+                futures.remove(future)
                 f.write(str((adj_matrix, best_dag.edges())) + '\n')
             f.close()
 
@@ -88,11 +103,47 @@ class DAGDatasetGenerator:
             print("Density factor = {}".format(density_factor))
 
             # Get all the possible DAGs within this topology
-            dags = self.generate_dags(adj_matrix)
+            dags = self.generate_subset_dags(adj_matrix)
             print(f"Number of DAGs generated: {len(dags)}")
 
         # Compute the best performing DAG within the topology
         best_dag, best_perf = self.get_best_dag_parallel_up_down(dags, adj_matrix)
+        print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
+
+        return best_dag, best_perf, adj_matrix
+
+    def run_once_cython(self, n):
+        dags = []
+        adj_matrix = []
+        while (len(dags) == 0):
+            # Generate a random adjacency matrix
+            adj_matrix, density_factor = self.generate_random_adj_matrix(n)
+            print("Density factor = {}".format(density_factor))
+
+            # Get all the possible DAGs within this topology
+            dags = self.generate_dags(adj_matrix)
+            print(f"Number of DAGs generated: {len(dags)}")
+
+        # Compute the best performing DAG within the topology
+        best_dag, best_perf = self.cython_get_best_dag_parallel_up_down(dags, adj_matrix)
+        print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
+
+        return best_dag, best_perf, adj_matrix
+
+    def run_once_with_adaptive_steps(self, n):
+        dags = []
+        adj_matrix = []
+        while (len(dags) == 0):
+            # Generate a random adjacency matrix
+            adj_matrix, density_factor = self.generate_random_adj_matrix(n)
+            print("Density factor = {}".format(density_factor))
+
+            # Get all the possible DAGs within this topology
+            dags = self.generate_subset_dags(adj_matrix)
+            print(f"Number of DAGs generated: {len(dags)}")
+
+        # Compute the best performing DAG within the topology
+        best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps(dags, adj_matrix)
         print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
 
         return best_dag, best_perf, adj_matrix
@@ -299,7 +350,7 @@ class DAGDatasetGenerator:
 
                 # Process packet transmission for all nodes
                 r = list(range(0, len(G.nodes)))
-                random.shuffle(r)
+                np.random.shuffle(r)
                 for i in r:
                     parent = list(G.nodes)[i]
                     if transmitting[parent] == True:
@@ -379,7 +430,7 @@ class DAGDatasetGenerator:
 
                 # Process packet transmission for all nodes
                 r = list(range(0, len(G.nodes)))
-                random.shuffle(r)
+                np.random.shuffle(r)
                 for i in r:
                     node = list(G.nodes)[i]
                     if packets[node] > 0 and not transmitting[node]:  # Node has packets to send and is not already transmitting
@@ -416,9 +467,14 @@ class DAGDatasetGenerator:
             return max_steps
 
 
-    def evaluate_dag_performance_combined(self, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps=-1):
-        print("NOT IMPLEMENTED")
-        return -1
+    def evaluate_dag_performance_combined(self, eval_up, eval_down, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
+        pr = cProfile.Profile()
+        pr.enable()
+        perf_up = eval_up(G, adj_matrix, max_steps=max_steps_up)
+        perf_down = eval_down(G, adj_matrix, max_steps=max_steps_down)
+        pr.disable()
+        pr.print_stats()
+        return G, perf_up, perf_down
 
     def get_best_dag(self, dags, adj_matrix, eval_func):
         start_time = time.time()
@@ -460,6 +516,68 @@ class DAGDatasetGenerator:
         print("Computing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
 
         return best_dag, best_perf
+
+    def cython_get_best_dag_parallel_up_down(self, dags, adj_matrix):
+        start_time = time.time()
+
+        # Pre-compute step threshold. This way we don't compute performance for bad DAGs because it is not relevant and waists execution time.
+        max_steps_up = 1e9  # very high value just for initialization
+        max_steps_down = 1e9  # very high value just for initialization
+        if len(dags) > 800:
+            iter = 50 if len(dags) >= 50 else len(dags)
+            for _ in range(0, iter):
+                max_steps_up = min(CythonDAGOperation.cython_evaluate_dag_performance_up(random.choice(dags), adj_matrix), max_steps_up)
+                max_steps_down = min(CythonDAGOperation.cython_evaluate_dag_performance_down(random.choice(dags), adj_matrix), max_steps_down)
+            print("Max steps = " + str(max_steps_up))
+            print("Max steps = " + str(max_steps_down))
+        else:
+            max_steps_up = -1
+            max_steps_down = -1
+
+        # Prepare the arguments as a list of tuples
+        args_up = [(i, dag, adj_matrix, CythonDAGOperation.cython_evaluate_dag_performance_up, max_steps_up) for i, dag in enumerate(dags)]
+        args_down = [(i, dag, adj_matrix, CythonDAGOperation.cython_evaluate_dag_performance_down, max_steps_down) for i, dag in enumerate(dags)]
+
+        # Use a multiprocessing pool to parallelize the evaluation
+        with multiprocessing.Pool() as pool:
+            print("\nComputing UP\n")
+            up_results = pool.starmap(self.evaluate_dag, args_up, chunksize=100)
+            print("\nComputing Down\n")
+            down_results = pool.starmap(self.evaluate_dag, args_down, chunksize=100)
+
+        # Combine the two lists
+        up_results_np = np.array([item[1] for item in up_results])
+        down_results_np = np.array([item[1] for item in down_results])
+
+        # normalize and combine
+        up_results_np /= np.max(up_results_np)
+        down_results_np /= np.max(down_results_np)
+        combined_results_np = up_results_np + down_results_np
+
+        combined_results = [(up_results[i][0], int(item)) for i, item in enumerate(combined_results_np)]
+
+        print(len(up_results))
+        print(len(down_results))
+        print(len(combined_results))
+
+        best_dag_up, best_perf_up = min(up_results, key=lambda x: x[1])
+        best_dag_down, best_perf_down = min(down_results, key=lambda x: x[1])
+
+        sorted_combined_results = combined_results
+        sorted_combined_results.sort(key=lambda x: x[1], reverse=True)
+        best_dag_up_overall_score = [list(item[0]) for item in sorted_combined_results].index(list(best_dag_up))
+        best_dag_down_overall_score = [list(item[0]) for item in sorted_combined_results].index(list(best_dag_down))
+
+        # Find the best DAG based on up and down performance
+        best_dag, best_perf = min(combined_results, key=lambda x: x[1])
+
+        end_time = time.time()
+        print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
+
+        print("Info: best DAG UP rank = {}/{} (perf {}) and best DAG DOWN rank = {}/{} (perf {}) compared to overall best score".format(best_dag_up_overall_score, len(combined_results), best_perf_up, best_dag_down_overall_score, len(combined_results), best_perf_down))
+
+        return best_dag, best_perf
+    
 
     def get_best_dag_parallel_up_down(self, dags, adj_matrix):
         start_time = time.time()
@@ -522,6 +640,7 @@ class DAGDatasetGenerator:
 
         return best_dag, best_perf
 
+    """
     def get_best_dag_parallel_combined(self, dags, adj_matrix):
         start_time = time.time()
 
@@ -545,5 +664,95 @@ class DAGDatasetGenerator:
 
         end_time = time.time()
         print("Computing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
+
+        return best_dag, best_perf
+    """
+
+    def get_best_dag_parallel_with_adaptative_steps(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1):
+        start_time = time.time()
+        # Pre-compute step threshold. This way we don't compute performance for bad DAGs because it is not relevant and waists execution time.
+        max_steps_up = 1e9  # very high value just for initialization
+        max_steps_down = 1e9  # very high value just for initialization
+        if len(dags) > 800:
+            iter = 50 if len(dags) >= 50 else len(dags)
+            for _ in range(0, iter):
+                max_steps_up = min(CythonDAGOperation.cython_evaluate_dag_performance_up(random.choice(dags), adj_matrix), max_steps_up)
+                max_steps_down = min(CythonDAGOperation.cython_evaluate_dag_performance_down(random.choice(dags), adj_matrix), max_steps_down)
+            print("Max steps = " + str(max_steps_up))
+            print("Max steps = " + str(max_steps_down))
+        else:
+            max_steps_up = -1
+            max_steps_down = -1
+
+        dags_stack_copy = copy.deepcopy(dags)
+        up_results = []
+        down_results = []
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self.evaluate_dag_performance_combined, 
+                    CythonDAGOperation.cython_evaluate_dag_performance_up, 
+                    CythonDAGOperation.cython_evaluate_dag_performance_down,
+                    dags_stack_copy.pop(),
+                    adj_matrix,
+                    max_steps_up=max_steps_up,
+                    max_steps_down=max_steps_down)
+                for i in range(min(max_workers, len(dags_stack_copy)))}
+            for future in concurrent.futures.as_completed(futures):
+                current_dag, perf_up, perf_down = future.result()
+                up_results.append((current_dag, perf_up))
+                down_results.append((current_dag, perf_down))
+
+                if max_steps_up == -1 and max_steps_down == -1:
+                    max_steps_up = perf_up
+                    max_steps_down = perf_down
+
+                if perf_up < max_steps_up:
+                    max_steps_up = perf_up if (perf_up / max_steps_up) > delta_threshold else max_steps_up * (1 - reduce_ratio)
+
+                if perf_down < max_steps_down:
+                    max_steps_down = perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio)
+                    
+                futures.remove(future)
+                if len(dags_stack_copy):
+                    futures.add(executor.submit(
+                        self.evaluate_dag_performance_combined, 
+                        CythonDAGOperation.cython_evaluate_dag_performance_up, 
+                        CythonDAGOperation.cython_evaluate_dag_performance_down,
+                        dags_stack_copy.pop(),
+                        max_steps_up=max_steps_up * margin_max_step,
+                        max_steps_down=max_steps_down * margin_max_step)
+                    )
+
+        # Combine the two lists
+        up_results_np = np.array([item[1] for item in up_results])
+        down_results_np = np.array([item[1] for item in down_results])
+
+        # normalize and combine
+        up_results_np /= np.max(up_results_np)
+        down_results_np /= np.max(down_results_np)
+        combined_results_np = up_results_np + down_results_np
+
+        combined_results = [(up_results[i][0], int(item)) for i, item in enumerate(combined_results_np)]
+
+        print(len(up_results_np))
+        print(len(down_results_np))
+        print(len(combined_results))
+
+        best_dag_up, best_perf_up = min(up_results, key=lambda x: x[1])
+        best_dag_down, best_perf_down = min(down_results, key=lambda x: x[1])
+
+        sorted_combined_results = combined_results
+        sorted_combined_results.sort(key=lambda x: x[1], reverse=True)
+        best_dag_up_overall_score = [list(item[0]) for item in sorted_combined_results].index(list(best_dag_up))
+        best_dag_down_overall_score = [list(item[0]) for item in sorted_combined_results].index(list(best_dag_down))
+
+        # Find the best DAG based on up and down performance
+        best_dag, best_perf = min(combined_results, key=lambda x: x[1])
+
+        end_time = time.time()
+        print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
+
+        print("Info: best DAG UP rank = {}/{} (perf {}) and best DAG DOWN rank = {}/{} (perf {}) compared to overall best score".format(best_dag_up_overall_score, len(combined_results), best_perf_up, best_dag_down_overall_score, len(combined_results), best_perf_down))
 
         return best_dag, best_perf
