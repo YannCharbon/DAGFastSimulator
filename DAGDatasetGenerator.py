@@ -14,6 +14,7 @@ import os
 import CythonDAGOperation 
 import copy
 import cProfile
+from pathlib import Path
 """ How to use
 from DAGDatasetGenerator import DAGDatasetGenerator
 
@@ -61,17 +62,21 @@ class DAGDatasetGenerator:
     Run the simulation in parallel
     """ 
     def run_parallel(self, n, count, max_workers=os.cpu_count()):
+        dags_path = Path('dags')
+        dags_path.mkdir(exist_ok=True)
+
         start_time = time.time()
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            #futures = {executor.submit(self.run_once, n) for i in range(count)}
             futures = {executor.submit(self.run_once_with_adaptive_steps, n) for i in range(count)}
-            filename = "topologies_perf_{}.txt".format(datetime.datetime.now()).replace(":", "_")
-            f = open(filename, "a")
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
+                rssi_edges = dict()
+                for edge in best_dag.edges:
+                   rssi_edges[edge] = adj_matrix[edge[0]][edge[1]]
+                nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
                 futures.remove(future)
-                f.write(str((adj_matrix, best_dag.edges())) + '\n')
-            f.close()
+                filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
+                nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
@@ -147,13 +152,14 @@ class DAGDatasetGenerator:
 
         # RSSI with best quality = 1.0 No connection = 0.0
         # the ' - 2 * np.random.rand()' controls the density of the interconnections
-        density_factor = np.random.rand()
-        a = np.maximum(np.random.rand(n, n) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
+        rng = np.random.default_rng() # Required in multiprocessing to avoid having same random values in all processes 
+        density_factor = rng.random()
+        a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
         a = symmetrize(a)
 
         while not check_integrity(a):
-            density_factor = np.random.rand()
-            a = np.maximum(np.random.rand(n, n) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
+            density_factor = rng.random()
+            a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
             a = symmetrize(a)
 
         a = limit_neighbors(a)
@@ -228,23 +234,26 @@ class DAGDatasetGenerator:
             digraphs.append(G)
         return digraphs
 
-    def generate_subset_dags(self, adj_matrix, ratio=0.2):
+    def generate_subset_dags(self, adj_matrix):
         nodes = list(range(len(adj_matrix)))
         all_edges = [(i, j) for i in range(len(adj_matrix)) for j in range(i+1, len(adj_matrix)) if adj_matrix[i][j] > 0]
         num_nodes = len(nodes)
         all_possible_trees = []
-
         def dfs_tree(adj_matrix, visited, current_node, tree_edges):
             visited[current_node] = True
             for neighbor in range(len(adj_matrix)):
                 if adj_matrix[current_node][neighbor] > 0 and not visited[neighbor]:
                     tree_edges.append((current_node, neighbor))
                     dfs_tree(adj_matrix, visited, neighbor, tree_edges)
-
         # Generate subset combinations of edges that can form a tree (n-1 edges)
         rng = np.random.default_rng()
-        all_comb = list(combinations(all_edges, num_nodes - 1))
-        for edges in rng.choice(all_comb, math.ceil(len(all_comb) * ratio)):
+        # all_comb = list(combinations(all_edges, num_nodes - 1)) # Crash with big combination list
+        n_edges = len(all_edges)
+        k_nodes = num_nodes - 1
+        total_combinations = math.factorial(n_edges)/(math.factorial(k_nodes)*math.factorial(n_edges - k_nodes))
+        comb_iter = combinations(all_edges, k_nodes)
+        print(f"Total number of combinations: {total_combinations}")
+        for edges in comb_iter:
             tree_matrix = np.zeros_like(adj_matrix)
             for edge in edges:
                 tree_matrix[edge[0]][edge[1]] = 1
@@ -255,6 +264,13 @@ class DAGDatasetGenerator:
             dfs_tree(tree_matrix, visited, 0, tree_edges)
             if len(tree_edges) == num_nodes - 1 and all(visited):
                 all_possible_trees.append(tree_edges)
+            
+            # Progress with iterator by a random jump (scale by the number of nodes and number of edges)
+            total_skip = rng.integers(math.ceil(k_nodes * n_edges))
+            #print(f"Element skipped : {total_skip}")
+            for _ in range(total_skip):
+                if not len(next(comb_iter, [])):
+                    break
 
         digraphs = []
         for tree_edges in all_possible_trees:
@@ -435,12 +451,8 @@ class DAGDatasetGenerator:
 
 
     def evaluate_dag_performance_combined(self, eval_up, eval_down, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
-        pr = cProfile.Profile()
-        pr.enable()
         perf_up = eval_up(G, adj_matrix, max_steps=max_steps_up)
         perf_down = eval_down(G, adj_matrix, max_steps=max_steps_down)
-        pr.disable()
-        pr.print_stats()
         return G, perf_up, perf_down
 
     def get_best_dag(self, dags, adj_matrix, eval_func):
@@ -723,3 +735,8 @@ class DAGDatasetGenerator:
         print("Info: best DAG UP rank = {}/{} (perf {}) and best DAG DOWN rank = {}/{} (perf {}) compared to overall best score".format(best_dag_up_overall_score, len(combined_results), best_perf_up, best_dag_down_overall_score, len(combined_results), best_perf_down))
 
         return best_dag, best_perf
+
+
+if __name__ == '__main__':
+    generator = DAGDatasetGenerator()
+    generator.run_once_with_adaptive_steps(15)

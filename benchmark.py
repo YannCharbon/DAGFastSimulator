@@ -4,6 +4,7 @@ import numpy as np
 import timeit
 import random
 
+
 def begin_banner(fn_name):
     print("------------------------------------------")
     print(f"Begin {fn_name}")
@@ -163,12 +164,12 @@ def benchmark_random_values(max_iter):
 if __name__ == '__main__':
     generator = DAGDatasetGenerator()
     MAX_ITER = 5
-    NUM_NODES = 10
+    NUM_NODES = 13
 
     # Benchmark DAG generator class
-    #benchmark_dags_generations(NUM_NODES, MAX_ITER)
+    benchmark_dags_generations(NUM_NODES, MAX_ITER)
     #benchmark_updown(NUM_NODES, MAX_ITER)
-    benchmark_updown_with_adaptative_steps(NUM_NODES, MAX_ITER)
+    #benchmark_updown_with_adaptative_steps(NUM_NODES, MAX_ITER)
 
     # Benchmark numpy vs random package
     #benchmark_shuffle(NUM_NODES, MAX_ITER)
