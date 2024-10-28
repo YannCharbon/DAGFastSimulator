@@ -663,7 +663,6 @@ class DAGDatasetGenerator:
             max_steps_up = -1
             max_steps_down = -1
 
-        dags_stack_copy = copy.deepcopy(dags)
         up_results = []
         down_results = []
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -672,11 +671,11 @@ class DAGDatasetGenerator:
                     self.evaluate_dag_performance_combined, 
                     CythonDAGOperation.cython_evaluate_dag_performance_up, 
                     CythonDAGOperation.cython_evaluate_dag_performance_down,
-                    dags_stack_copy.pop(),
+                    dags.pop(),
                     adj_matrix,
                     max_steps_up=max_steps_up,
                     max_steps_down=max_steps_down)
-                for i in range(min(max_workers, len(dags_stack_copy)))}
+                for i in range(min(max_workers, len(dags)))}
             for future in concurrent.futures.as_completed(futures):
                 current_dag, perf_up, perf_down = future.result()
                 up_results.append((current_dag, perf_up))
@@ -693,12 +692,12 @@ class DAGDatasetGenerator:
                     max_steps_down = perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio)
                     
                 futures.remove(future)
-                if len(dags_stack_copy):
+                if len(dags):
                     futures.add(executor.submit(
                         self.evaluate_dag_performance_combined, 
                         CythonDAGOperation.cython_evaluate_dag_performance_up, 
                         CythonDAGOperation.cython_evaluate_dag_performance_down,
-                        dags_stack_copy.pop(),
+                        dags.pop(),
                         max_steps_up=max_steps_up * margin_max_step,
                         max_steps_down=max_steps_down * margin_max_step)
                     )

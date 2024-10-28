@@ -17,7 +17,7 @@ if __name__ == '__main__':
     #generator.draw_dag(best_dag, adj_matrix)
 
     #generator.run(10, 10)
-    generator.run_parallel(10, 4, int(os.cpu_count()/2))
+    generator.run_parallel(20, 10, int(os.cpu_count()/2))
     # To keep plots open
     #generator.draw_network(adj_matrix)
     #generator.draw_dag(best_dag, adj_matrix)
