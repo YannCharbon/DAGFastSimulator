@@ -11,10 +11,17 @@ import datetime
 import concurrent.futures
 import math
 import os
-import CythonDAGOperation 
+import CythonDAGOperation
 import copy
 import cProfile
 from pathlib import Path
+import ctypes
+
+# Define the C struct in ctypes
+class Edge(ctypes.Structure):
+    _fields_ = [("parent", ctypes.c_int), ("child", ctypes.c_int)]
+
+
 """ How to use
 from DAGDatasetGenerator import DAGDatasetGenerator
 
@@ -60,7 +67,7 @@ class DAGDatasetGenerator:
 
     """
     Run the simulation in parallel
-    """ 
+    """
     def run_parallel(self, n, count, max_workers=os.cpu_count()):
         dags_path = Path('dags')
         dags_path.mkdir(exist_ok=True)
@@ -80,7 +87,30 @@ class DAGDatasetGenerator:
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
-    
+
+    """
+    Run the simulation in parallel with pure C simulation
+    """
+    def run_parallel_pure_c(self, n, count, max_workers=os.cpu_count()):
+        dags_path = Path('dags')
+        dags_path.mkdir(exist_ok=True)
+
+        start_time = time.time()
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.run_once_with_adaptive_steps_pure_c, n) for i in range(count)}
+            for future in concurrent.futures.as_completed(futures):
+                best_dag, best_perf, adj_matrix = future.result()
+                rssi_edges = dict()
+                for edge in best_dag.edges:
+                   rssi_edges[edge] = adj_matrix[edge[0]][edge[1]]
+                nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
+                futures.remove(future)
+                filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
+                nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
+
+        end_time = time.time()
+        print(f"Total runtime : {end_time - start_time}")
+
     """
     Runs the simulation for one random topology of size n by n
     """
@@ -117,6 +147,28 @@ class DAGDatasetGenerator:
         # Compute the best performing DAG within the topology
         best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps(dags, adj_matrix)
         print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
+        np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
+        print(adj_matrix)
+
+        return best_dag, best_perf, adj_matrix
+
+    def run_once_with_adaptive_steps_pure_c(self, n):
+        dags = []
+        adj_matrix = []
+        while (len(dags) == 0):
+            # Generate a random adjacency matrix
+            adj_matrix, density_factor = self.generate_random_adj_matrix(n)
+            print("Density factor = {}".format(density_factor))
+
+            # Get all the possible DAGs within this topology
+            dags = self.generate_subset_dags(adj_matrix)
+            print(f"Number of DAGs generated: {len(dags)}")
+
+        # Compute the best performing DAG within the topology
+        best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps_pure_c(dags, adj_matrix)
+        print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
+        np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
+        print(adj_matrix)
 
         return best_dag, best_perf, adj_matrix
 
@@ -152,7 +204,7 @@ class DAGDatasetGenerator:
 
         # RSSI with best quality = 1.0 No connection = 0.0
         # the ' - 2 * np.random.rand()' controls the density of the interconnections
-        rng = np.random.default_rng() # Required in multiprocessing to avoid having same random values in all processes 
+        rng = np.random.default_rng() # Required in multiprocessing to avoid having same random values in all processes
         density_factor = rng.random()
         a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
         a = symmetrize(a)
@@ -264,7 +316,7 @@ class DAGDatasetGenerator:
             dfs_tree(tree_matrix, visited, 0, tree_edges)
             if len(tree_edges) == num_nodes - 1 and all(visited):
                 all_possible_trees.append(tree_edges)
-            
+
             # Progress with iterator by a random jump (scale by the number of nodes and number of edges)
             total_skip = rng.integers(math.ceil(k_nodes * n_edges))
             #print(f"Element skipped : {total_skip}")
@@ -321,7 +373,7 @@ class DAGDatasetGenerator:
             if epoch != 0:
                 for i in range(0, len(packets)):
                     # This is done to optimize execution time
-                    packets[i] = 0
+                    packets[i] = packets_per_node
                     transmitting[i] = False
                     transmit_intent[i] = True
 
@@ -352,6 +404,7 @@ class DAGDatasetGenerator:
                         if transmission_success:
                             packets[parent] += 1
                             packets[transmitting_child] -= 1
+                            transmit_intent[transmitting_child] = False
 
                         transmitting[transmitting_child] = True
 
@@ -455,6 +508,32 @@ class DAGDatasetGenerator:
         perf_down = eval_down(G, adj_matrix, max_steps=max_steps_down)
         return G, perf_up, perf_down
 
+    def evaluate_dag_performance_combined_pure_c(self, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
+        dll_name = "CDAGOperation/CDAGOperation.so"
+        dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
+        lib = ctypes.CDLL(dllabspath)
+
+        lib.evaluate_dag_performance_up.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        lib.evaluate_dag_performance_up.restype = ctypes.c_int
+
+        lib.evaluate_dag_performance_down.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        lib.evaluate_dag_performance_down.restype = ctypes.c_int
+
+        CMatrixType = ctypes.POINTER(ctypes.c_float) * len(adj_matrix)
+        adj_matrix_c = CMatrixType(
+            *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
+        )
+
+        dag = list(G.edges())
+
+        c_dag = (Edge * len(dag))(
+            *[Edge(parent, child) for parent, child in dag]
+        )
+
+        perf_up = int(lib.evaluate_dag_performance_up(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_up))
+        perf_down = int(lib.evaluate_dag_performance_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_down))
+        return G, perf_up, perf_down
+
     def get_best_dag(self, dags, adj_matrix, eval_func):
         start_time = time.time()
 
@@ -535,9 +614,9 @@ class DAGDatasetGenerator:
 
         combined_results = [(up_results[i][0], int(item)) for i, item in enumerate(combined_results_np)]
 
-        print(len(up_results))
-        print(len(down_results))
-        print(len(combined_results))
+        #print(len(up_results))
+        #print(len(down_results))
+        #print(len(combined_results))
 
         best_dag_up, best_perf_up = min(up_results, key=lambda x: x[1])
         best_dag_down, best_perf_down = min(down_results, key=lambda x: x[1])
@@ -556,7 +635,7 @@ class DAGDatasetGenerator:
         print("Info: best DAG UP rank = {}/{} (perf {}) and best DAG DOWN rank = {}/{} (perf {}) compared to overall best score".format(best_dag_up_overall_score, len(combined_results), best_perf_up, best_dag_down_overall_score, len(combined_results), best_perf_down))
 
         return best_dag, best_perf
-    
+
 
     def get_best_dag_parallel_up_down(self, dags, adj_matrix):
         start_time = time.time()
@@ -597,9 +676,9 @@ class DAGDatasetGenerator:
 
         combined_results = [(up_results[i][0], int(item)) for i, item in enumerate(combined_results_np)]
 
-        print(len(up_results))
-        print(len(down_results))
-        print(len(combined_results))
+        #print(len(up_results))
+        #print(len(down_results))
+        #print(len(combined_results))
 
         best_dag_up, best_perf_up = min(up_results, key=lambda x: x[1])
         best_dag_down, best_perf_down = min(down_results, key=lambda x: x[1])
@@ -669,8 +748,8 @@ class DAGDatasetGenerator:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = {
                 executor.submit(
-                    self.evaluate_dag_performance_combined, 
-                    CythonDAGOperation.cython_evaluate_dag_performance_up, 
+                    self.evaluate_dag_performance_combined,
+                    CythonDAGOperation.cython_evaluate_dag_performance_up,
                     CythonDAGOperation.cython_evaluate_dag_performance_down,
                     dags_stack_copy.pop(),
                     adj_matrix,
@@ -691,12 +770,12 @@ class DAGDatasetGenerator:
 
                 if perf_down < max_steps_down:
                     max_steps_down = perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio)
-                    
+
                 futures.remove(future)
                 if len(dags_stack_copy):
                     futures.add(executor.submit(
-                        self.evaluate_dag_performance_combined, 
-                        CythonDAGOperation.cython_evaluate_dag_performance_up, 
+                        self.evaluate_dag_performance_combined,
+                        CythonDAGOperation.cython_evaluate_dag_performance_up,
                         CythonDAGOperation.cython_evaluate_dag_performance_down,
                         dags_stack_copy.pop(),
                         max_steps_up=max_steps_up * margin_max_step,
@@ -704,8 +783,8 @@ class DAGDatasetGenerator:
                     )
 
         # Combine the two lists
-        up_results_np = np.array([item[1] for item in up_results])
-        down_results_np = np.array([item[1] for item in down_results])
+        up_results_np = np.array([item[1] for item in up_results]).astype(float)
+        down_results_np = np.array([item[1] for item in down_results]).astype(float)
 
         # normalize and combine
         up_results_np /= np.max(up_results_np)
@@ -714,9 +793,114 @@ class DAGDatasetGenerator:
 
         combined_results = [(up_results[i][0], int(item)) for i, item in enumerate(combined_results_np)]
 
-        print(len(up_results_np))
-        print(len(down_results_np))
-        print(len(combined_results))
+        #print(len(up_results_np))
+        #print(len(down_results_np))
+        #print(len(combined_results))
+
+        best_dag_up, best_perf_up = min(up_results, key=lambda x: x[1])
+        best_dag_down, best_perf_down = min(down_results, key=lambda x: x[1])
+
+        sorted_combined_results = combined_results
+        sorted_combined_results.sort(key=lambda x: x[1], reverse=True)
+        best_dag_up_overall_score = [list(item[0]) for item in sorted_combined_results].index(list(best_dag_up))
+        best_dag_down_overall_score = [list(item[0]) for item in sorted_combined_results].index(list(best_dag_down))
+
+        # Find the best DAG based on up and down performance
+        best_dag, best_perf = min(combined_results, key=lambda x: x[1])
+
+        end_time = time.time()
+        print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
+
+        print("Info: best DAG UP rank = {}/{} (perf {}) and best DAG DOWN rank = {}/{} (perf {}) compared to overall best score".format(best_dag_up_overall_score, len(combined_results), best_perf_up, best_dag_down_overall_score, len(combined_results), best_perf_down))
+
+        return best_dag, best_perf
+
+    def get_best_dag_parallel_with_adaptative_steps_pure_c(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1):
+        start_time = time.time()
+
+        dll_name = "CDAGOperation/CDAGOperation.so"
+        dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
+        lib = ctypes.CDLL(dllabspath)
+
+        lib.evaluate_dag_performance_up.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        lib.evaluate_dag_performance_up.restype = ctypes.c_int
+
+        lib.evaluate_dag_performance_down.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        lib.evaluate_dag_performance_down.restype = ctypes.c_int
+
+        CMatrixType = ctypes.POINTER(ctypes.c_float) * len(adj_matrix)
+        adj_matrix_c = CMatrixType(
+            *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
+        )
+
+        # Pre-compute step threshold. This way we don't compute performance for bad DAGs because it is not relevant and waists execution time.
+        max_steps_up = 1e9  # very high value just for initialization
+        max_steps_down = 1e9  # very high value just for initialization
+        if len(dags) > 800:
+            iter = 50 if len(dags) >= 50 else len(dags)
+            for _ in range(0, iter):
+                dag = list(random.choice(dags).edges())
+                c_dag = (Edge * len(dag))(
+                    *[Edge(parent, child) for parent, child in dag]
+                )
+                max_steps_up = int(min(lib.evaluate_dag_performance_up(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, -1), max_steps_up))
+                max_steps_down = int(min(lib.evaluate_dag_performance_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, -1), max_steps_down))
+            print("Max steps = " + str(max_steps_up))
+            print("Max steps = " + str(max_steps_down))
+        else:
+            max_steps_up = -1
+            max_steps_down = -1
+
+        dags_stack_copy = copy.deepcopy(dags)
+        up_results = []
+        down_results = []
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self.evaluate_dag_performance_combined_pure_c,
+                    dags_stack_copy.pop(),
+                    adj_matrix,
+                    max_steps_up=max_steps_up,
+                    max_steps_down=max_steps_down)
+                for i in range(min(max_workers, len(dags_stack_copy)))}
+            for future in concurrent.futures.as_completed(futures):
+                current_dag, perf_up, perf_down = future.result()
+                up_results.append((current_dag, perf_up))
+                down_results.append((current_dag, perf_down))
+
+                if max_steps_up == -1 and max_steps_down == -1:
+                    max_steps_up = perf_up
+                    max_steps_down = perf_down
+
+                if perf_up < max_steps_up:
+                    max_steps_up = perf_up if (perf_up / max_steps_up) > delta_threshold else max_steps_up * (1 - reduce_ratio)
+
+                if perf_down < max_steps_down:
+                    max_steps_down = perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio)
+
+                futures.remove(future)
+                if len(dags_stack_copy):
+                    futures.add(executor.submit(
+                        self.evaluate_dag_performance_combined_pure_c,
+                        dags_stack_copy.pop(),
+                        max_steps_up=max_steps_up * margin_max_step,
+                        max_steps_down=max_steps_down * margin_max_step)
+                    )
+
+        # Combine the two lists
+        up_results_np = np.array([item[1] for item in up_results]).astype(float)
+        down_results_np = np.array([item[1] for item in down_results]).astype(float)
+
+        # normalize and combine
+        up_results_np /= np.max(up_results_np)
+        down_results_np /= np.max(down_results_np)
+        combined_results_np = up_results_np + down_results_np
+
+        combined_results = [(up_results[i][0], int(item)) for i, item in enumerate(combined_results_np)]
+
+        #print(len(up_results_np))
+        #print(len(down_results_np))
+        #print(len(combined_results))
 
         best_dag_up, best_perf_up = min(up_results, key=lambda x: x[1])
         best_dag_down, best_perf_down = min(down_results, key=lambda x: x[1])
