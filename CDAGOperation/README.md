@@ -1,0 +1,1 @@
+`gcc -DMAX_NODES=20 -DMAX_CHILDREN=5 -shared -o CDAGOperation.so -fPIC CDAGOperation.c`
