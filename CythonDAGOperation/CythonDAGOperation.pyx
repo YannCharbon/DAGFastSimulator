@@ -19,7 +19,7 @@ cpdef cython_evaluate_dag_performance_up(G, adj_matrix, int epoch_len=2, int pac
     #packets = {node: packets_per_node for node in G.nodes}
     #transmit_intent = {node: True for node in G.nodes}  # Transmission intentions
     #transmitting = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
-    
+
     cdef dict packets = dict(G.nodes)
     cdef dict transmit_intent = dict(G.nodes)
     cdef dict transmitting = dict(G.nodes)
@@ -32,16 +32,17 @@ cpdef cython_evaluate_dag_performance_up(G, adj_matrix, int epoch_len=2, int pac
     early_stop = False
     for epoch in range(epoch_len):
         if epoch != 0:
+            total_packets = (n - 1) * packets_per_node
             for i in range(0, len(packets)):
                 # This is done to optimize execution time
-                packets[i] = 0
+                packets[i] = packets_per_node
                 transmitting[i] = False
                 transmit_intent[i] = True
 
         steps = 0
         while total_packets > 0:
             steps += 1
-            
+
             transmit_intent = {node: packets[node] > 0 for node in G.nodes}  # Transmission intentions
             #for node in G.nodes:
             #    transmit_intent[node] = packets[node] > 0
@@ -60,17 +61,20 @@ cpdef cython_evaluate_dag_performance_up(G, adj_matrix, int epoch_len=2, int pac
                     transmitting_child = random.choice(children_transmit_intents)
 
                 if transmitting_child >= 0:
-                    # Determine if transmission is successful based on RSSI
-                    rssi = adj_matrix[parent][transmitting_child]  # Get RSSI value for the link
-                    transmission_success = random.random() <= rssi
+                    if transmitting[transmitting_child] == False:
+                        # Determine if transmission is successful based on RSSI
+                        rssi = adj_matrix[parent][transmitting_child]  # Get RSSI value for the link
+                        transmission_success = random.random() <= rssi
 
-                    if transmission_success:
-                        packets[parent] += 1
-                        packets[transmitting_child] -= 1
-                        if parent == 0:
-                            total_packets -= 1
+                        if transmission_success:
+                            packets[parent] += 1
+                            packets[transmitting_child] -= 1
+                            if parent == 0:
+                                total_packets -= 1
+                            transmit_intent[transmitting_child] = False
+                            transmitting[parent] = True     # Parent is not actually transmitting, but it is busy while receiving from child
 
-                    transmitting[transmitting_child] = True
+                        transmitting[transmitting_child] = True
 
             # Reset the transmitting and receiving status for the next step
             transmitting = {node: False for node in G.nodes}
@@ -138,26 +142,28 @@ cpdef cython_evaluate_dag_performance_down(G, adj_matrix, epoch_len=2, packets_p
             r = list(range(0, len(G.nodes)))
             np.random.shuffle(r)
             for i in r:
-                node = list(G.nodes)[i]
-                if packets[node] > 0 and not transmitting[node]:  # Node has packets to send and is not already transmitting
-                    children = list(G.successors(node))
+                parent = list(G.nodes)[i]
+                if packets[parent] > 0 and not transmitting[parent]:  # Node has packets to send and is not already transmitting
+                    children = list(G.successors(parent))
                     if children:
                         # Choose a child randomly to try to send the packet to
                         child = random.choice(children)
 
                         if not transmitting[child]:  # Check if the child is not currently transmitting
                             # Determine if transmission is successful based on RSSI
-                            rssi = adj_matrix[node][child]  # Get RSSI value for the link
+                            rssi = adj_matrix[parent][child]  # Get RSSI value for the link
                             transmission_success = random.random() <= rssi
 
                             if transmission_success and packets[child] < packets_per_node:
                                 packets[child] += 1
-                                packets[node] -= 1
-                                transmitting[child] = True  # Mark the child as transmitting. It is also the case when transmission success is false because it simulates a collision
+                                packets[parent] -= 1
+                                transmitting[child] = True  # Mark the child as busy (not actually transmitting but receiving from parent).
+
+                            transmitting[parent] = True     # Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
 
             # Reset the transmitting status for the next step
             transmitting = {node: False for node in G.nodes}
-            all_nodes_not_full = [packets[node] < packets_per_node for node in G.nodes] 
+            all_nodes_not_full = [packets[node] < packets_per_node for node in G.nodes]
 
             if max_steps != -1 and steps > max_steps:
                 early_stop = True
