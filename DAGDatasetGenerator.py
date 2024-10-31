@@ -161,7 +161,7 @@ class DAGDatasetGenerator:
             print("Density factor = {}".format(density_factor))
 
             # Get all the possible DAGs within this topology
-            dags = self.generate_subset_dags(adj_matrix)
+            dags = self.generate_subset_dags_pure_c(adj_matrix)
             print(f"Number of DAGs generated: {len(dags)}")
 
         # Compute the best performing DAG within the topology
@@ -286,7 +286,9 @@ class DAGDatasetGenerator:
             digraphs.append(G)
         return digraphs
 
-    def generate_subset_dags(self, adj_matrix):
+    def generate_subset_dags(self, adj_matrix, test_mode=False):
+        #start_time = time.time()
+
         nodes = list(range(len(adj_matrix)))
         all_edges = [(i, j) for i in range(len(adj_matrix)) for j in range(i+1, len(adj_matrix)) if adj_matrix[i][j] > 0]
         num_nodes = len(nodes)
@@ -304,7 +306,11 @@ class DAGDatasetGenerator:
         k_nodes = num_nodes - 1
         total_combinations = math.factorial(n_edges)/(math.factorial(k_nodes)*math.factorial(n_edges - k_nodes))
         comb_iter = combinations(all_edges, k_nodes)
+        #end_of_combination_computation = time.time()
+        #print(f"Took {int((end_of_combination_computation - start_time) * 1e6)} [us] to compute combinations")
         print(f"Total number of combinations: {total_combinations}")
+
+        start_of_tree_computation = time.time()
         for edges in comb_iter:
             tree_matrix = np.zeros_like(adj_matrix)
             for edge in edges:
@@ -318,14 +324,64 @@ class DAGDatasetGenerator:
                 all_possible_trees.append(tree_edges)
 
             # Progress with iterator by a random jump (scale by the number of nodes and number of edges)
-            total_skip = rng.integers(math.ceil(k_nodes * n_edges))
+            if test_mode == False:
+                total_skip = rng.integers(k_nodes * n_edges)
+            else:
+                # Deterministic behaviour
+                total_skip = int((k_nodes * n_edges) / 2)
             #print(f"Element skipped : {total_skip}")
             for _ in range(total_skip):
                 if not len(next(comb_iter, [])):
                     break
 
+        #end_of_tree_computation = time.time()
+        #print(f"Took {int((end_of_tree_computation - start_of_tree_computation) * 1e6)} [us] to generate all dags")
+        #start_of_format_conversion = time.time()
+
         digraphs = []
         for tree_edges in all_possible_trees:
+            G = nx.DiGraph()
+            G.add_edges_from(tree_edges)
+            digraphs.append(G)
+
+        #end_of_format_conversion = time.time()
+        #print(f"Took {int((end_of_format_conversion - start_of_format_conversion) * 1e6)} [us] to convert format")
+        #print(f"Total time {int((end_of_format_conversion - start_time) * 1e6)} [us]")
+
+        return digraphs
+
+    def generate_subset_dags_pure_c(self, adj_matrix, test_mode=False):
+        dll_name = "CDAGOperation/CDAGOperation.so"
+        dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
+        lib = ctypes.CDLL(dllabspath)
+
+        lib.generate_subset_dags.argtypes = (ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_bool)
+        lib.generate_subset_dags.restype = ctypes.POINTER(ctypes.POINTER(Edge))
+
+        lib.free_all_possible_tree.argtypes = (ctypes.POINTER(ctypes.POINTER(Edge)), ctypes.c_int)
+
+        CMatrixType = ctypes.POINTER(ctypes.c_float) * len(adj_matrix)
+        adj_matrix_c = CMatrixType(
+            *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
+        )
+
+        generated_dags_count = 0
+        generated_dags_count_c = ctypes.c_int(generated_dags_count)
+
+        all_possible_dags_c = lib.generate_subset_dags(adj_matrix_c, len(adj_matrix[0]), ctypes.pointer(generated_dags_count_c), test_mode)
+
+        # Convert the C result back to Python list of lists
+        all_possible_dags = []
+        for i in range(generated_dags_count_c.value):
+            # Each row in `c_dag_array` is a pointer to an array of `Edge`
+            dag_size = len(adj_matrix[0]) - 1  # Based on the tree's edge count
+            dag = [(all_possible_dags_c[i][j].parent, all_possible_dags_c[i][j].child) for j in range(dag_size)]
+            all_possible_dags.append(dag)
+
+        lib.free_all_possible_tree(all_possible_dags_c, generated_dags_count_c)
+
+        digraphs = []
+        for tree_edges in all_possible_dags:
             G = nx.DiGraph()
             G.add_edges_from(tree_edges)
             digraphs.append(G)
@@ -922,4 +978,37 @@ class DAGDatasetGenerator:
 
 if __name__ == '__main__':
     generator = DAGDatasetGenerator()
-    generator.run_once_with_adaptive_steps(15)
+    #generator.run_once_with_adaptive_steps(15)
+
+
+
+    # Test
+
+    adj_matrix = [[0.00, 0.40, 0.19, 0.00, 0.00, 0.00, 0.10],
+ [0.40, 0.00, 0.12, 0.00, 0.58, 0.00, 0.00],
+ [0.19, 0.12, 0.00, 0.00, 0.00, 0.31, 0.00],
+ [0.00, 0.00, 0.00, 0.09, 0.15, 0.02, 0.00],
+ [0.00, 0.58, 0.00, 0.15, 0.00, 0.22, 0.00],
+ [0.00, 0.00, 0.31, 0.02, 0.22, 0.00, 0.19],
+ [0.10, 0.00, 0.00, 0.00, 0.00, 0.19, 0.00]]
+
+    # Generate a random adjacency matrix
+    adj_matrix, density_factor = generator.generate_random_adj_matrix(10)
+    #print(np.array2string(adj_matrix, separator=', ', formatter={'float_kind':lambda x: f"{x:.2f}"}, suppress_small=True))
+    #print("Density factor = {}".format(density_factor))
+
+
+    # Get all the possible DAGs within this topology
+    dags_python = generator.generate_subset_dags(adj_matrix, True)
+    dags_pure_c = generator.generate_subset_dags_pure_c(adj_matrix, True)
+
+
+    print(f"Number of DAGs generated using Python: {len(dags_python)}")
+    print(type(dags_python))
+    for digraph in dags_python:
+        print(digraph.edges())
+    print(f"Number of DAGs generated using Pure C: {len(dags_pure_c)}")
+    print(type(dags_pure_c))
+    for digraph in dags_pure_c:
+        print(digraph.edges())
+

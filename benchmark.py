@@ -18,21 +18,39 @@ def benchmark_dags_generations(num_nodes, max_iter):
     generator = DAGDatasetGenerator()
     total_time = 0.
     total_time_partial= 0.
+    total_time_partial_pure_c = 0.
     for i in range(max_iter):
+        print(f"Iteration {i}")
         adj_matrix, density_factor = generator.generate_random_adj_matrix(num_nodes)
-        start_time = time.time()
-        generator.generate_dags(adj_matrix)
-        end_time = time.time()
-        total_time += end_time - start_time
-        print(f"Run time dag generation : {total_time}")
+        # Don't compute using basic function because not suited for bigger topologies
+        #start_time = time.time()
+        #generator.generate_dags(adj_matrix)
+        #end_time = time.time()
+        #total_time += end_time - start_time
+        #print(f"Run time dag generation : {total_time}")
         # Test with Generation of subset DAGs
         start_time = time.time()
         generator.generate_subset_dags(adj_matrix)
         end_time = time.time()
         total_time_partial += end_time - start_time
         print(f"Run time subset dag generation : {total_time_partial}")
-    print(f"Average processing time : {total_time / max_iter}")
-    print(f"Average processing time with partial generation: {total_time_partial / max_iter}")
+        # Test with Generation of subset DAGs and pure C implementation
+        start_time = time.time()
+        generator.generate_subset_dags_pure_c(adj_matrix)
+        end_time = time.time()
+        total_time_partial_pure_c += end_time - start_time
+        print(f"Run time subset dag generation and pure C: {total_time_partial_pure_c}")
+
+    average_time = total_time / (max_iter * max_iter)
+    average_time_partial = total_time_partial / (max_iter * max_iter)
+    average_time_partial_pure_c = total_time_partial_pure_c / (max_iter * max_iter)
+
+    partial_improvement_percent = (average_time - average_time_partial) / average_time * 100
+    partial_pure_c_improvement_percent = (average_time_partial - average_time_partial_pure_c) / average_time_partial * 100
+
+    print(f"Average processing time : {average_time}")
+    print(f"Average processing time with partial generation: {average_time_partial}, improvement: {partial_improvement_percent}%")
+    print(f"Average processing time with partial generation and pure C: {average_time_partial_pure_c}, improvement: {partial_pure_c_improvement_percent}%")
     end_banner()
 
 def benchmark_updown(num_nodes, max_iter):
@@ -135,11 +153,11 @@ def benchmark_updown_with_adaptative_steps_pure_c(num_nodes, max_iter):
     average_time_adaptative_pure_c = total_time_adaptative_pure_c / (max_iter * max_iter)
 
     adaptative_improvement_percent = (average_time - average_time_adaptative) / average_time * 100
-    adaptative_pure_c_improvement_percent = (total_time_adaptative - total_time_adaptative_pure_c) / total_time_adaptative * 100
+    adaptative_pure_c_improvement_percent = (average_time_adaptative - average_time_adaptative_pure_c) / average_time_adaptative * 100
 
-    print(f"Average processing time : {total_time / (max_iter * max_iter)}")
-    print(f"Average processing time with adaptative steps: {total_time_adaptative/ (max_iter * max_iter)}, improvement: {adaptative_improvement_percent}%")
-    print(f"Average processing time with adaptative steps and pure C: {total_time_adaptative_pure_c/ (max_iter * max_iter)}, improvement: {adaptative_pure_c_improvement_percent}%")
+    print(f"Average processing time : {average_time}")
+    print(f"Average processing time with adaptative steps: {average_time_adaptative}, improvement: {adaptative_improvement_percent}%")
+    print(f"Average processing time with adaptative steps and pure C: {average_time_adaptative_pure_c}, improvement: {adaptative_pure_c_improvement_percent}%")
     end_banner()
 
 ## Benchmark numpy
@@ -211,13 +229,13 @@ def benchmark_random_values(max_iter):
 if __name__ == '__main__':
     generator = DAGDatasetGenerator()
     MAX_ITER = 5
-    NUM_NODES = 13
+    NUM_NODES = 15
 
     # Benchmark DAG generator class
-    #benchmark_dags_generations(NUM_NODES, MAX_ITER)
+    benchmark_dags_generations(NUM_NODES, MAX_ITER)
     #benchmark_updown(NUM_NODES, MAX_ITER)
     #benchmark_updown_with_adaptative_steps(NUM_NODES, MAX_ITER)
-    benchmark_updown_with_adaptative_steps_pure_c(NUM_NODES, MAX_ITER)
+    #benchmark_updown_with_adaptative_steps_pure_c(NUM_NODES, MAX_ITER)
 
     # Benchmark numpy vs random package
     #benchmark_shuffle(NUM_NODES, MAX_ITER)
