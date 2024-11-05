@@ -6,3 +6,5 @@ __pycache__
 # Cython build related
 build/
 *.so
+# Related to memray
+*.bin*
