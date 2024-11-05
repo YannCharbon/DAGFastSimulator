@@ -79,7 +79,7 @@ class DAGDatasetGenerator:
                 best_dag, best_perf, adj_matrix = future.result()
                 rssi_edges = dict()
                 for edge in best_dag.edges:
-                   rssi_edges[edge] = adj_matrix[edge[0]][edge[1]]
+                   rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
                 nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
                 futures.remove(future)
                 filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
@@ -102,7 +102,7 @@ class DAGDatasetGenerator:
                 best_dag, best_perf, adj_matrix = future.result()
                 rssi_edges = dict()
                 for edge in best_dag.edges:
-                   rssi_edges[edge] = adj_matrix[edge[0]][edge[1]]
+                   rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
                 nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
                 futures.remove(future)
                 filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
