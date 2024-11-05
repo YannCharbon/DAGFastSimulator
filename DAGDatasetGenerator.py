@@ -558,6 +558,116 @@ class DAGDatasetGenerator:
         else:
             return max_steps
 
+    """
+    This method combines the UP and DOWN simulations into a single simulation
+    """
+    def evaluate_dag_performance_up_down(self, G, adj_matrix, epoch_len=2, packets_per_node=15, max_steps=-1):
+        n = len(G.nodes)
+
+        packets_up = {node: packets_per_node for node in G.nodes}
+        packets_down = {node: 0 for node in G.nodes}
+        transmit_intent_up = {node: True for node in G.nodes}  # Transmission intentions
+        transmitting = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
+
+        avg_steps = 0
+        early_stop = False
+        for epoch in range(epoch_len):
+            if epoch != 0:
+                for i in range(0, len(packets_up)):
+                    # This is done to optimize execution time
+                    packets_up[i] = packets_per_node
+                    packets_down[i] = 0
+                    transmitting[i] = False
+                    transmit_intent_up[i] = True
+
+            steps = 0
+
+            up_finished = False
+            down_finished = False
+            while not up_finished or not down_finished:
+                steps += 1
+
+                # Root node Root node has a new packet to insert into the network. Does not send it yet.
+                if packets_down[0] < packets_per_node:
+                    packets_down[0] += 1
+
+                transmit_intent_up = {node: packets_up[node] > 0 for node in G.nodes}  # Transmission intentions
+
+                # Process packet transmission for all nodes
+                r = list(range(0, len(G.nodes)))
+                np.random.shuffle(r)
+                for i in r:
+                    # Decide whether the current node wants to transmit UP or DOWN
+                    up_not_down = False
+                    if not up_finished and not down_finished:
+                        up_not_down = True if random.random() >= 0.5 else False
+                    elif up_finished:
+                        up_not_down = False     # UP operation done -> only DOWN has to run
+                    elif down_finished:
+                        up_not_down = True      # DOWN operation done -> only UP has to run
+
+                    if up_not_down == True: # UP
+                        parent = list(G.nodes)[i]
+                        if transmitting[parent] == True:
+                            continue
+                        children = list(G.successors(parent))
+                        transmitting_child = -1
+                        children_transmit_intents = [child for child in children if transmit_intent_up[child] == True]
+                        if children_transmit_intents != []:
+                            transmitting_child = random.choice(children_transmit_intents)
+
+                        if transmitting_child >= 0:
+                            # Determine if transmission is successful based on RSSI
+                            rssi = adj_matrix[parent][transmitting_child]  # Get RSSI value for the link
+                            transmission_success = random.random() <= rssi
+
+                            if transmission_success:
+                                packets_up[parent] += 1
+                                packets_up[transmitting_child] -= 1
+                                transmit_intent_up[transmitting_child] = False
+
+                            transmitting[transmitting_child] = True
+                    else:   # DOWN
+                        node = list(G.nodes)[i]
+                        if packets_down[node] > 0 and not transmitting[node]:  # Node has packets to send and is not already transmitting
+                            children = list(G.successors(node))
+                            if children:
+                                # Choose a child randomly to try to send the packet to
+                                child = random.choice(children)
+
+                                if not transmitting[child]:  # Check if the child is not currently transmitting
+                                    # Determine if transmission is successful based on RSSI
+                                    rssi = adj_matrix[node][child]  # Get RSSI value for the link
+                                    transmission_success = random.random() <= rssi
+
+                                    if transmission_success and packets_down[child] < packets_per_node:
+                                        packets_down[child] += 1
+                                        packets_down[node] -= 1
+                                        transmitting[child] = True  # Mark the child as transmitting. It is also the case when transmission success is false because it simulates a collision
+
+
+                # Reset the transmitting and receiving status for the next step
+                transmitting = {node: False for node in G.nodes}
+                # Root node never holds an packet
+                packets_up[0] = 0
+
+                if max_steps != -1 and steps > max_steps:
+                    early_stop = True
+                    break
+
+                # Update end conditions
+                up_finished = not any(packets_up[node] > 0 for node in G.nodes)
+                down_finished = not any(packets_down[node] < packets_per_node for node in G.nodes)
+
+            avg_steps += steps
+
+            if early_stop == True:
+                break
+
+        if not early_stop:
+            return int(avg_steps / epoch_len)
+        else:
+            return max_steps
 
     def evaluate_dag_performance_combined(self, eval_up, eval_down, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
         perf_up = eval_up(G, adj_matrix, max_steps=max_steps_up)
@@ -1011,4 +1121,10 @@ if __name__ == '__main__':
     print(type(dags_pure_c))
     for digraph in dags_pure_c:
         print(digraph.edges())
+
+    perf_up = generator.evaluate_dag_performance_up(dags_pure_c[0], adj_matrix, 2, 15, -1)
+    perf_down = generator.evaluate_dag_performance_down(dags_pure_c[0], adj_matrix, 2, 15, -1)
+    perf_up_down = generator.evaluate_dag_performance_up_down(dags_pure_c[0], adj_matrix, 2, 15, -1)
+
+    print(f"Perf UP = {perf_up}, perf DOWN = {perf_down}, perf UP/DOWN = {perf_up_down}")
 
