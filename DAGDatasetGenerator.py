@@ -112,6 +112,29 @@ class DAGDatasetGenerator:
         print(f"Total runtime : {end_time - start_time}")
 
     """
+    Run the simulation in parallel with pure C double flux simulation
+    """
+    def run_parallel_double_flux_pure_c(self, n, count, max_workers=os.cpu_count()):
+        dags_path = Path('dags')
+        dags_path.mkdir(exist_ok=True)
+
+        start_time = time.time()
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.run_once_with_adaptive_steps_double_flux_pure_c, n) for i in range(count)}
+            for future in concurrent.futures.as_completed(futures):
+                best_dag, best_perf, adj_matrix = future.result()
+                rssi_edges = dict()
+                for edge in best_dag.edges:
+                   rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
+                nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
+                futures.remove(future)
+                filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
+                nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
+
+        end_time = time.time()
+        print(f"Total runtime : {end_time - start_time}")
+
+    """
     Runs the simulation for one random topology of size n by n
     """
     def run_once(self, n):
@@ -166,6 +189,26 @@ class DAGDatasetGenerator:
 
         # Compute the best performing DAG within the topology
         best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps_pure_c(dags, adj_matrix)
+        print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
+        np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
+        print(adj_matrix)
+
+        return best_dag, best_perf, adj_matrix
+
+    def run_once_with_adaptive_steps_double_flux_pure_c(self, n):
+        dags = []
+        adj_matrix = []
+        while (len(dags) == 0):
+            # Generate a random adjacency matrix
+            adj_matrix, density_factor = self.generate_random_adj_matrix(n)
+            print("Density factor = {}".format(density_factor))
+
+            # Get all the possible DAGs within this topology
+            dags = self.generate_subset_dags_pure_c(adj_matrix)
+            print(f"Number of DAGs generated: {len(dags)}")
+
+        # Compute the best performing DAG within the topology
+        best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(dags, adj_matrix)
         print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
         np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
         print(adj_matrix)
@@ -700,6 +743,28 @@ class DAGDatasetGenerator:
         perf_down = int(lib.evaluate_dag_performance_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_down))
         return G, perf_up, perf_down
 
+    def evaluate_dag_performance_double_flux_pure_c(self, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps=-1):
+        dll_name = "CDAGOperation/CDAGOperation.so"
+        dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
+        lib = ctypes.CDLL(dllabspath)
+
+        lib.evaluate_dag_performance_up_down.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        lib.evaluate_dag_performance_up_down.restype = ctypes.c_int
+
+        CMatrixType = ctypes.POINTER(ctypes.c_float) * len(adj_matrix)
+        adj_matrix_c = CMatrixType(
+            *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
+        )
+
+        dag = list(G.edges())
+
+        c_dag = (Edge * len(dag))(
+            *[Edge(parent, child) for parent, child in dag]
+        )
+
+        perf = int(lib.evaluate_dag_performance_up_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps))
+        return G, perf
+
     def get_best_dag(self, dags, adj_matrix, eval_func):
         start_time = time.time()
 
@@ -1081,6 +1146,73 @@ class DAGDatasetGenerator:
         print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
 
         print("Info: best DAG UP rank = {}/{} (perf {}) and best DAG DOWN rank = {}/{} (perf {}) compared to overall best score".format(best_dag_up_overall_score, len(combined_results), best_perf_up, best_dag_down_overall_score, len(combined_results), best_perf_down))
+
+        return best_dag, best_perf
+
+    def get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1):
+        start_time = time.time()
+
+        dll_name = "CDAGOperation/CDAGOperation.so"
+        dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
+        lib = ctypes.CDLL(dllabspath)
+
+        lib.evaluate_dag_performance_up_down.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        lib.evaluate_dag_performance_up_down.restype = ctypes.c_int
+
+        CMatrixType = ctypes.POINTER(ctypes.c_float) * len(adj_matrix)
+        adj_matrix_c = CMatrixType(
+            *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
+        )
+
+        # Pre-compute step threshold. This way we don't compute performance for bad DAGs because it is not relevant and waists execution time.
+        max_steps = 1e9  # very high value just for initialization
+        if len(dags) > 800:
+            iter = 50 if len(dags) >= 50 else len(dags)
+            for _ in range(0, iter):
+                dag = list(random.choice(dags).edges())
+                c_dag = (Edge * len(dag))(
+                    *[Edge(parent, child) for parent, child in dag]
+                )
+                max_steps = int(min(lib.evaluate_dag_performance_up_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, -1), max_steps))
+            print("Max steps = " + str(max_steps))
+        else:
+            max_steps = -1
+
+        results = []
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self.evaluate_dag_performance_double_flux_pure_c,
+                    dags.pop(),
+                    adj_matrix,
+                    max_steps=max_steps)
+                for i in range(min(max_workers, len(dags)))}
+            for future in concurrent.futures.as_completed(futures):
+                current_dag, perf = future.result()
+                results.append((current_dag, perf))
+
+                if max_steps == -1:
+                    max_steps = perf
+
+                if perf < max_steps:
+                    max_steps = perf if (perf / max_steps) > delta_threshold else max_steps * (1 - reduce_ratio)
+
+                futures.remove(future)
+                if len(dags):
+                    futures.add(executor.submit(
+                        self.evaluate_dag_performance_double_flux_pure_c,
+                        dags.pop(),
+                        max_steps=max_steps * margin_max_step)
+                    )
+
+
+        # Find the best DAG based on up and down performance
+        best_dag, best_perf = min(results, key=lambda x: x[1])
+
+        end_time = time.time()
+        print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
+
+        print("Info: best DAG perf {}".format(best_perf))
 
         return best_dag, best_perf
 

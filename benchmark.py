@@ -3,6 +3,7 @@ import time
 import numpy as np
 import timeit
 import random
+import copy
 
 
 def begin_banner(fn_name):
@@ -119,6 +120,7 @@ def benchmark_updown_with_adaptative_steps_pure_c(num_nodes, max_iter):
     total_time = 0.
     total_time_adaptative = 0.
     total_time_adaptative_pure_c = 0.
+    total_time_adaptative_double_flux_pure_c = 0.
     nb_iter = 0
     for i in range(max_iter):
         adj_matrix, density_factor = generator.generate_random_adj_matrix(num_nodes)
@@ -128,36 +130,49 @@ def benchmark_updown_with_adaptative_steps_pure_c(num_nodes, max_iter):
             continue
         for j in range(max_iter):
             nb_iter += 1
+            all_dags_copy = copy.deepcopy(all_dags)
             print(f"Iteration {nb_iter}")
             start_time = time.time()
-            generator.get_best_dag_parallel_up_down(all_dags, adj_matrix)
+            generator.get_best_dag_parallel_up_down(all_dags_copy, adj_matrix)
             end_time = time.time()
             total_time += end_time - start_time
             print(f"Run time to find best DAG : {end_time - start_time}")
 
             # Test with Generation of subset DAGs
+            all_dags_copy = copy.deepcopy(all_dags)
             start_time = time.time()
-            generator.get_best_dag_parallel_with_adaptative_steps(all_dags, adj_matrix)
+            generator.get_best_dag_parallel_with_adaptative_steps(all_dags_copy, adj_matrix)
             end_time = time.time()
             total_time_adaptative += end_time - start_time
             print(f"Run time to find best DAG with cython : {end_time - start_time}")
 
+            all_dags_copy = copy.deepcopy(all_dags)
             start_time = time.time()
-            generator.get_best_dag_parallel_with_adaptative_steps_pure_c(all_dags, adj_matrix)
+            generator.get_best_dag_parallel_with_adaptative_steps_pure_c(all_dags_copy, adj_matrix)
             end_time = time.time()
             total_time_adaptative_pure_c += end_time - start_time
             print(f"Run time to find best DAG with pure C : {end_time - start_time}")
 
+            all_dags_copy = copy.deepcopy(all_dags)
+            start_time = time.time()
+            generator.get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(all_dags_copy, adj_matrix)
+            end_time = time.time()
+            total_time_adaptative_double_flux_pure_c += end_time - start_time
+            print(f"Run time to find best DAG with pure C and double flux : {end_time - start_time}")
+
     average_time = total_time / (max_iter * max_iter)
     average_time_adaptative = total_time_adaptative / (max_iter * max_iter)
     average_time_adaptative_pure_c = total_time_adaptative_pure_c / (max_iter * max_iter)
+    average_time_adaptative_double_flux_pure_c = total_time_adaptative_double_flux_pure_c / (max_iter * max_iter)
 
     adaptative_improvement_percent = (average_time - average_time_adaptative) / average_time * 100
     adaptative_pure_c_improvement_percent = (average_time_adaptative - average_time_adaptative_pure_c) / average_time_adaptative * 100
+    adaptative_double_flux_pure_c_improvement_percent = (average_time_adaptative_pure_c - average_time_adaptative_double_flux_pure_c) / average_time_adaptative_pure_c * 100
 
     print(f"Average processing time : {average_time}")
     print(f"Average processing time with adaptative steps: {average_time_adaptative}, improvement: {adaptative_improvement_percent}%")
     print(f"Average processing time with adaptative steps and pure C: {average_time_adaptative_pure_c}, improvement: {adaptative_pure_c_improvement_percent}%")
+    print(f"Average processing time with adaptative steps double flux and pure C: {average_time_adaptative_double_flux_pure_c}, improvement: {adaptative_double_flux_pure_c_improvement_percent}%")
     end_banner()
 
 ## Benchmark numpy
@@ -232,10 +247,10 @@ if __name__ == '__main__':
     NUM_NODES = 15
 
     # Benchmark DAG generator class
-    benchmark_dags_generations(NUM_NODES, MAX_ITER)
+    #benchmark_dags_generations(NUM_NODES, MAX_ITER)
     #benchmark_updown(NUM_NODES, MAX_ITER)
     #benchmark_updown_with_adaptative_steps(NUM_NODES, MAX_ITER)
-    #benchmark_updown_with_adaptative_steps_pure_c(NUM_NODES, MAX_ITER)
+    benchmark_updown_with_adaptative_steps_pure_c(NUM_NODES, MAX_ITER)
 
     # Benchmark numpy vs random package
     #benchmark_shuffle(NUM_NODES, MAX_ITER)

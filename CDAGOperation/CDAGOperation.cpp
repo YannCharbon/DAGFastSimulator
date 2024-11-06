@@ -35,6 +35,7 @@ typedef struct {
 extern "C" {
     int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps);
     int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps);
+    int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps);
     Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_dags_count, bool test_mode);
     void free_all_possible_tree(Edge **all_possible_trees_c, int dags_count);
 }
@@ -346,6 +347,177 @@ int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matr
 
             memset(transmitting, false, nodes_count);
             packets[0] = 0;
+
+            if (max_steps != -1 && steps > max_steps) {
+                early_stop = true;
+                break;
+            }
+        }
+
+        avg_steps += steps;
+
+        if (early_stop) {
+            break;
+        }
+    }
+
+    if (!early_stop) {
+        return avg_steps / epoch_len;
+    } else {
+        return max_steps;
+    }
+}
+
+
+/**
+    Uplink and downlink simultaneous global bandwidth measurement.
+
+    This method computes the number of iterations it takes to empty and fill the packet queues of each node within the network.
+ */
+int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
+    int packets_up[MAX_NODES];
+    int packets_down[MAX_NODES];
+    bool transmit_intent_up[MAX_NODES];
+    bool transmitting[MAX_NODES];
+
+    int random_indexes[MAX_NODES];
+
+    int children[MAX_CHILDREN];
+    int children_count = 0;
+    int children_transmit_intents[MAX_CHILDREN];
+    int children_transmit_intents_count = 0;
+
+    int total_packets_up = (nodes_count - 1) * packets_per_node;
+
+    if (epoch_len <= 0) {
+        epoch_len = 2;
+    }
+    if (packets_per_node <= 0) {
+        packets_per_node = 15;
+    }
+    if (max_steps <= 0) {
+        max_steps = -1;
+    }
+
+
+    for (int i = 0; i < nodes_count; i++) {
+        random_indexes[i] = i;
+    }
+    // Seed the random number generator
+    srand(time(NULL));
+
+    int avg_steps = 0;
+    bool early_stop = false;
+
+    for (int epoch = 0; epoch < epoch_len; epoch++) {
+
+        for (int i = 0; i < nodes_count; i++) {
+            packets_up[i] = packets_per_node;
+            packets_down[i] = 0;
+        }
+        memset(transmitting, false, nodes_count);
+        memset(transmit_intent_up, true, nodes_count);
+        total_packets_up = (nodes_count - 1) * packets_per_node;
+
+        bool down_finished = false;
+
+        bool up_not_down = false;
+
+        int steps = 0;
+        while (total_packets_up > 0 || !down_finished) {
+            steps++;
+
+            // Root node Root node has a new packet to insert into the network. Does not send it yet.
+            if (packets_down[0] < packets_per_node) {
+                packets_down[0]++;
+            }
+
+            for (int i = 0; i < nodes_count; i++) {
+                if (packets_up[i] > 0) {
+                    transmit_intent_up[i] = true;
+                } else {
+                    transmit_intent_up[i] = false;
+                }
+            }
+
+            // Process packet transmission for all nodes with randomized priority
+            shuffle(random_indexes, nodes_count);
+            for (int i = 0; i < nodes_count; i++) {
+                int parent = random_indexes[i];
+
+                // Decide whether the current node wants to transmit UP or DOWN
+                if (total_packets_up > 0 && !down_finished) {
+                    if (rand() % 100 >= 50) {
+                        up_not_down = true;
+                    } else {
+                        up_not_down = false;
+                    }
+                } else if (total_packets_up == 0) {
+                    up_not_down = false;    // UP operation done -> only DOWN has to run
+                } else if (down_finished) {
+                    up_not_down = true;     // DOWN operation done -> only UP has to run
+                }
+
+                if (up_not_down) {
+                    if (transmitting[parent]) {
+                        continue;
+                    }
+
+                    children_count = get_children(edges, edges_count, parent, children, children_count);
+                    if (children_count > 0) {
+                        children_transmit_intents_count = get_children_transmit_intents(children_transmit_intents, children_transmit_intents_count, children, children_count, transmit_intent_up);
+                        if (children_transmit_intents_count > 0) {
+                            int transmitting_child = children_transmit_intents[rand() % children_transmit_intents_count];
+                            if (transmitting[transmitting_child] == false) {
+                                float rssi = adj_matrix[parent][transmitting_child];
+
+                                if (transmission_success(rssi)) {
+                                    packets_up[parent]++;
+                                    packets_up[transmitting_child]--;
+                                    if (parent == 0) {
+                                        total_packets_up--;
+                                    }
+                                    transmit_intent_up[transmitting_child] = false;
+                                    transmitting[parent] = true;    // Parent is not actually transmitting, but it is busy while receiving from child
+                                }
+
+                                transmitting[transmitting_child] = true;
+                            }
+                        }
+                    }
+                } else {    // DOWN
+                    // Node has packets to send and is not already transmitting
+                    if (packets_down[parent] > 0 && !transmitting[parent]) {
+                        children_count = get_children(edges, edges_count, parent, children, children_count);
+                        if (children_count > 0) {
+                            // Choose a child randomly to try to send the packet to
+                            int child = children[rand() % children_count];
+
+                            // Check if the child is not currently transmitting
+                            if (!transmitting[child]) {
+                                float rssi = adj_matrix[parent][child];
+
+                                if (transmission_success(rssi) && packets_down[child] < packets_per_node) {
+                                    packets_down[child]++;
+                                    packets_down[parent]--;
+                                    transmitting[child] = true; // Mark the child as busy (not actually transmitting but receiving from parent).
+                                }
+
+                                transmitting[parent] = true; // Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Reset the transmitting and receiving status for the next step
+            memset(transmitting, false, nodes_count);
+
+            // Root node never holds an packet
+            packets_up[0] = 0;
+
+            // Store DOWN finish condition
+            down_finished = !any_packet_missing(nodes_count, packets_per_node, packets_down);
 
             if (max_steps != -1 && steps > max_steps) {
                 early_stop = true;
