@@ -8,3 +8,6 @@ build/
 *.so
 # Related to memray
 *.bin*
+# Valgrind
+*.out
+CDAGOperation/profiling
