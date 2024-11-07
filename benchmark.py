@@ -17,7 +17,7 @@ def end_banner():
 def benchmark_dags_generations(num_nodes, max_iter):
     begin_banner(benchmark_dags_generations.__name__)
     generator = DAGDatasetGenerator()
-    total_time = 0.
+    total_time = 10000.0    # big value in case this is not computed
     total_time_partial= 0.
     total_time_partial_pure_c = 0.
     for i in range(max_iter):
@@ -247,10 +247,10 @@ if __name__ == '__main__':
     NUM_NODES = 15
 
     # Benchmark DAG generator class
-    #benchmark_dags_generations(NUM_NODES, MAX_ITER)
+    benchmark_dags_generations(NUM_NODES, MAX_ITER)
     #benchmark_updown(NUM_NODES, MAX_ITER)
     #benchmark_updown_with_adaptative_steps(NUM_NODES, MAX_ITER)
-    benchmark_updown_with_adaptative_steps_pure_c(NUM_NODES, MAX_ITER)
+    #benchmark_updown_with_adaptative_steps_pure_c(NUM_NODES, MAX_ITER)
 
     # Benchmark numpy vs random package
     #benchmark_shuffle(NUM_NODES, MAX_ITER)

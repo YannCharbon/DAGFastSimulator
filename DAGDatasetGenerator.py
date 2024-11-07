@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -11,6 +12,8 @@ import datetime
 import concurrent.futures
 import math
 import os
+
+import psutil
 import CythonDAGOperation
 import copy
 import cProfile
@@ -104,13 +107,15 @@ class DAGDatasetGenerator:
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
                 rssi_edges = dict()
-                for edge in best_dag.edges:
+                for edge in best_dag:
                    rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
-                nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
+                G = nx.DiGraph()
+                G.add_edges_from(best_dag)
+                nx.set_edge_attributes(G, rssi_edges, 'rssi')
                 futures.remove(future)
                 result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
                 filename = Path(result_name + "_best_dag.csv")
-                nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
+                nx.write_edgelist(G, dags_path/filename, delimiter=',')
                 filename = Path(result_name + "_adj_matrix.txt")
                 np.savetxt(dags_path/filename, np.array(adj_matrix), delimiter=',')
 
@@ -130,13 +135,15 @@ class DAGDatasetGenerator:
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
                 rssi_edges = dict()
-                for edge in best_dag.edges:
+                for edge in best_dag:
                    rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
-                nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
+                G = nx.DiGraph()
+                G.add_edges_from(best_dag)
+                nx.set_edge_attributes(G, rssi_edges, 'rssi')
                 futures.remove(future)
                 result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
                 filename = Path(result_name + "_best_dag.csv")
-                nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
+                nx.write_edgelist(G, dags_path/filename, delimiter=',')
                 filename = Path(result_name + "_adj_matrix.txt")
                 np.savetxt(dags_path/filename, np.array(adj_matrix), delimiter=',')
 
@@ -198,7 +205,7 @@ class DAGDatasetGenerator:
 
         # Compute the best performing DAG within the topology
         best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps_pure_c(dags, adj_matrix)
-        print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
+        print("best dag is {} perf = {}".format(best_dag, best_perf))
         np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
         print(adj_matrix)
 
@@ -218,7 +225,7 @@ class DAGDatasetGenerator:
 
         # Compute the best performing DAG within the topology
         best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(dags, adj_matrix)
-        print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
+        print("best dag is {} perf = {}".format(best_dag, best_perf))
         np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
         print(adj_matrix)
 
@@ -390,17 +397,11 @@ class DAGDatasetGenerator:
         #print(f"Took {int((end_of_tree_computation - start_of_tree_computation) * 1e6)} [us] to generate all dags")
         #start_of_format_conversion = time.time()
 
-        digraphs = []
-        for tree_edges in all_possible_trees:
-            G = nx.DiGraph()
-            G.add_edges_from(tree_edges)
-            digraphs.append(G)
-
         #end_of_format_conversion = time.time()
         #print(f"Took {int((end_of_format_conversion - start_of_format_conversion) * 1e6)} [us] to convert format")
         #print(f"Total time {int((end_of_format_conversion - start_time) * 1e6)} [us]")
 
-        return digraphs
+        return all_possible_trees
 
     def generate_subset_dags_pure_c(self, adj_matrix, test_mode=False):
         dll_name = "CDAGOperation/libCDAGOperation.so"
@@ -432,12 +433,7 @@ class DAGDatasetGenerator:
 
         lib.free_all_possible_tree(all_possible_dags_c, generated_dags_count_c)
 
-        digraphs = []
-        for tree_edges in all_possible_dags:
-            G = nx.DiGraph()
-            G.add_edges_from(tree_edges)
-            digraphs.append(G)
-        return digraphs
+        return all_possible_dags
 
     def draw_dag(self, G, adj_matrix):
         plt.figure()
@@ -726,7 +722,7 @@ class DAGDatasetGenerator:
         perf_down = eval_down(G, adj_matrix, max_steps=max_steps_down)
         return G, perf_up, perf_down
 
-    def evaluate_dag_performance_combined_pure_c(self, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
+    def evaluate_dag_performance_combined_pure_c(self, dag, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
         dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
@@ -742,17 +738,15 @@ class DAGDatasetGenerator:
             *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
         )
 
-        dag = list(G.edges())
-
         c_dag = (Edge * len(dag))(
             *[Edge(parent, child) for parent, child in dag]
         )
 
         perf_up = int(lib.evaluate_dag_performance_up(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_up))
         perf_down = int(lib.evaluate_dag_performance_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_down))
-        return G, perf_up, perf_down
+        return dag, perf_up, perf_down
 
-    def evaluate_dag_performance_double_flux_pure_c(self, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps=-1):
+    def evaluate_dag_performance_double_flux_pure_c(self, dag, adj_matrix, epoch_len=1, packets_per_node=15, max_steps=-1):
         dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
@@ -765,14 +759,12 @@ class DAGDatasetGenerator:
             *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
         )
 
-        dag = list(G.edges())
-
         c_dag = (Edge * len(dag))(
             *[Edge(parent, child) for parent, child in dag]
         )
 
         perf = int(lib.evaluate_dag_performance_up_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps))
-        return G, perf
+        return dag, perf
 
     def get_best_dag(self, dags, adj_matrix, eval_func):
         start_time = time.time()
@@ -1078,7 +1070,7 @@ class DAGDatasetGenerator:
         if len(dags) > 800:
             iter = 50 if len(dags) >= 50 else len(dags)
             for _ in range(0, iter):
-                dag = list(random.choice(dags).edges())
+                dag = random.choice(dags)
                 c_dag = (Edge * len(dag))(
                     *[Edge(parent, child) for parent, child in dag]
                 )
@@ -1178,7 +1170,7 @@ class DAGDatasetGenerator:
         if len(dags) > 800:
             iter = 50 if len(dags) >= 50 else len(dags)
             for _ in range(0, iter):
-                dag = list(random.choice(dags).edges())
+                dag = random.choice(dags)
                 c_dag = (Edge * len(dag))(
                     *[Edge(parent, child) for parent, child in dag]
                 )
@@ -1241,14 +1233,14 @@ if __name__ == '__main__':
  [0.00, 0.58, 0.00, 0.15, 0.00, 0.22, 0.00],
  [0.00, 0.00, 0.31, 0.02, 0.22, 0.00, 0.19],
  [0.10, 0.00, 0.00, 0.00, 0.00, 0.19, 0.00]]
-    
 
-    
+
+
     #adj_matrix = np.loadtxt("dags/topologies_2024-11-06 16_29_44.968765_adj_matrix.txt", delimiter=',').tolist()
     #generator.draw_network(adj_matrix)
     adj_matrix = np.loadtxt("dags/topologies_2024-11-06 16_48_43.661391_adj_matrix.txt", delimiter=',').tolist()
     #generator.draw_network(adj_matrix)
-    
+
 
     # Generate a random adjacency matrix
     #adj_matrix, density_factor = generator.generate_random_adj_matrix(10)
