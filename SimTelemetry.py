@@ -18,21 +18,21 @@ class SimTelemetry:
             self.nodes_telemetry[node].rank = nx.shortest_path_length(self.dag, target=node, source=root_id) if node != root_id else 0
             parent = list(self.dag.predecessors(node))
             if len(parent) > 0:
-                self.nodes_telemetry[node].rssi = self.dag.edges[(parent[0], node)]['rssi'] 
+                self.nodes_telemetry[node].rssi = self.dag.edges[(parent[0], node)]['rssi']
                 self.nodes_telemetry[node].parent = parent[0]
-        
+
     def incr_fail_tx(self, node_id: int):
         self.nodes_telemetry[node_id].tx_fail +=1
-    
+
     def incr_success_tx(self, node_id: int):
         self.nodes_telemetry[node_id].tx_success +=1
-    
+
     def incr_collision_avoided(self, node_id: int):
         self.nodes_telemetry[node_id].collision_avoided +=1
 
     def set_node_rank(self, node_id: int, rank: int):
         self.nodes_telemetry[node_id].rank = rank
-    
+
     def run_simulation(self):
         self.simulate_uplink()
         self.simulate_downlink()
@@ -45,7 +45,7 @@ class SimTelemetry:
 
     def simulate_uplink(self, epoch_len=2, packets_per_node=15, max_steps=-1):
         n = len(self.dag.nodes)
-        
+
         packets = dict(self.dag.nodes)
         transmit_intent = dict(self.dag.nodes)
         transmitting = dict(self.dag.nodes)
@@ -60,14 +60,14 @@ class SimTelemetry:
             if epoch != 0:
                 for i in range(0, len(packets)):
                     # This is done to optimize execution time
-                    packets[i] = 0
+                    packets[i] = packets_per_node
                     transmitting[i] = False
                     transmit_intent[i] = True
 
             steps = 0
             while total_packets > 0:
                 steps += 1
-                
+
                 transmit_intent = {node: packets[node] > 0 for node in self.dag.nodes}  # Transmission intentions
                 #for node in G.nodes:
                 #    transmit_intent[node] = packets[node] > 0
@@ -110,7 +110,7 @@ class SimTelemetry:
 
             avg_steps += steps
         return avg_steps / epoch_len
-    
+
 
     def simulate_downlink(self, epoch_len=2, packets_per_node=15, max_steps=-1):
         packets = dict(self.dag.nodes)
@@ -164,7 +164,7 @@ class SimTelemetry:
 
                 # Reset the transmitting status for the next step
                 transmitting = {node: False for node in self.dag.nodes}
-                all_nodes_not_full = [packets[node] < packets_per_node for node in self.dag.nodes] 
+                all_nodes_not_full = [packets[node] < packets_per_node for node in self.dag.nodes]
 
             avg_steps += steps
         return avg_steps / epoch_len
@@ -177,9 +177,9 @@ class EnumNodeType(str, Enum):
 class NodeTelemetry:
     def __init__(self, nodeType : EnumNodeType = EnumNodeType.NODE):
         self.node_type = nodeType
-        self.parent = -1 
+        self.parent = -1
         self.rssi = -1
-        self.rank = -1 
+        self.rank = -1
         self.tx_fail = 0
         self.tx_success = 0
         self.collision_avoided = 0
@@ -190,5 +190,5 @@ if __name__ == '__main__':
     sim.run_simulation()
     simulation_path = Path('simulation')
     simulation_path.mkdir(exist_ok=True)
-    
+
     sim.generate_report(simulation_path / Path(sim.filepath.replace('.csv', '_simulation.csv')))
