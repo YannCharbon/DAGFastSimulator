@@ -5,7 +5,7 @@ class Edge(ctypes.Structure):
     _fields_ = [("parent", ctypes.c_int), ("child", ctypes.c_int)]
 
 if __name__ == '__main__':
-    lib = ctypes.CDLL('./CDAGOperation.so')
+    lib = ctypes.CDLL('./libCDAGOperation.so')
     lib.evaluate_dag_performance_up.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
     lib.evaluate_dag_performance_up.restype = ctypes.c_int
 

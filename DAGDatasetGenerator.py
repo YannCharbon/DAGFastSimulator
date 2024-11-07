@@ -403,7 +403,7 @@ class DAGDatasetGenerator:
         return digraphs
 
     def generate_subset_dags_pure_c(self, adj_matrix, test_mode=False):
-        dll_name = "CDAGOperation/CDAGOperation.so"
+        dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
@@ -727,7 +727,7 @@ class DAGDatasetGenerator:
         return G, perf_up, perf_down
 
     def evaluate_dag_performance_combined_pure_c(self, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
-        dll_name = "CDAGOperation/CDAGOperation.so"
+        dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
@@ -753,7 +753,7 @@ class DAGDatasetGenerator:
         return G, perf_up, perf_down
 
     def evaluate_dag_performance_double_flux_pure_c(self, G, adj_matrix, epoch_len=1, packets_per_node=15, max_steps=-1):
-        dll_name = "CDAGOperation/CDAGOperation.so"
+        dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
@@ -1057,7 +1057,7 @@ class DAGDatasetGenerator:
     def get_best_dag_parallel_with_adaptative_steps_pure_c(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1):
         start_time = time.time()
 
-        dll_name = "CDAGOperation/CDAGOperation.so"
+        dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
@@ -1161,7 +1161,7 @@ class DAGDatasetGenerator:
     def get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1):
         start_time = time.time()
 
-        dll_name = "CDAGOperation/CDAGOperation.so"
+        dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
