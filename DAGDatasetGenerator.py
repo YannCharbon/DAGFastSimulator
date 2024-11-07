@@ -82,8 +82,11 @@ class DAGDatasetGenerator:
                    rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
                 nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
                 futures.remove(future)
-                filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
+                result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
+                filename = Path(result_name + "_best_dag.csv")
                 nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
+                filename = Path(result_name + "_adj_matrix.txt")
+                np.savetxt(dags_path/filename, np.array(adj_matrix), delimiter=',')
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
@@ -105,8 +108,11 @@ class DAGDatasetGenerator:
                    rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
                 nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
                 futures.remove(future)
-                filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
+                result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
+                filename = Path(result_name + "_best_dag.csv")
                 nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
+                filename = Path(result_name + "_adj_matrix.txt")
+                np.savetxt(dags_path/filename, np.array(adj_matrix), delimiter=',')
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
@@ -128,8 +134,11 @@ class DAGDatasetGenerator:
                    rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
                 nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
                 futures.remove(future)
-                filename = Path("topologies_perf_{}.csv".format(datetime.datetime.now()).replace(":", "_"))
+                result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
+                filename = Path(result_name + "_best_dag.csv")
                 nx.write_edgelist(best_dag, dags_path/filename, delimiter=',')
+                filename = Path(result_name + "_adj_matrix.txt")
+                np.savetxt(dags_path/filename, np.array(adj_matrix), delimiter=',')
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
@@ -294,7 +303,7 @@ class DAGDatasetGenerator:
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
 
         plt.title("Network Topology with RSSI Values")
-        plt.show(block=False)
+        plt.show(block=True)
 
     def generate_dags(self, adj_matrix):
         nodes = list(range(len(adj_matrix)))
@@ -1232,9 +1241,17 @@ if __name__ == '__main__':
  [0.00, 0.58, 0.00, 0.15, 0.00, 0.22, 0.00],
  [0.00, 0.00, 0.31, 0.02, 0.22, 0.00, 0.19],
  [0.10, 0.00, 0.00, 0.00, 0.00, 0.19, 0.00]]
+    
+
+    
+    #adj_matrix = np.loadtxt("dags/topologies_2024-11-06 16_29_44.968765_adj_matrix.txt", delimiter=',').tolist()
+    #generator.draw_network(adj_matrix)
+    adj_matrix = np.loadtxt("dags/topologies_2024-11-06 16_48_43.661391_adj_matrix.txt", delimiter=',').tolist()
+    #generator.draw_network(adj_matrix)
+    
 
     # Generate a random adjacency matrix
-    adj_matrix, density_factor = generator.generate_random_adj_matrix(10)
+    #adj_matrix, density_factor = generator.generate_random_adj_matrix(10)
     #print(np.array2string(adj_matrix, separator=', ', formatter={'float_kind':lambda x: f"{x:.2f}"}, suppress_small=True))
     #print("Density factor = {}".format(density_factor))
 
@@ -1245,13 +1262,13 @@ if __name__ == '__main__':
 
 
     print(f"Number of DAGs generated using Python: {len(dags_python)}")
-    print(type(dags_python))
-    for digraph in dags_python:
-        print(digraph.edges())
+    #print(type(dags_python))
+    #for digraph in dags_python:
+    #    print(digraph.edges())
     print(f"Number of DAGs generated using Pure C: {len(dags_pure_c)}")
-    print(type(dags_pure_c))
-    for digraph in dags_pure_c:
-        print(digraph.edges())
+    #print(type(dags_pure_c))
+    #for digraph in dags_pure_c:
+    #    print(digraph.edges())
 
     perf_up = generator.evaluate_dag_performance_up(dags_pure_c[0], adj_matrix, 2, 15, -1)
     perf_down = generator.evaluate_dag_performance_down(dags_pure_c[0], adj_matrix, 2, 15, -1)

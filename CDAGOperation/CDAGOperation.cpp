@@ -539,27 +539,32 @@ int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_m
     }
 }
 
-// Non-recursive version using a stack. This might not work properly. Check.
-/*static void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int start_node, vector<Edge> *tree_edges) {
+// Non-recursive version using a stack.
+static void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int start_node, std::vector<Edge> *tree_edges) {
     std::stack<int> stack;
     stack.push(start_node);
+    visited[start_node] = true;
 
     while (!stack.empty()) {
         int current_node = stack.top();
         stack.pop();
-        visited[current_node] = true;
 
-        for (int neighbor = 0; neighbor < nodes_count; ++neighbor) {
-            if (adj_matrix[current_node][neighbor] > 0 && !visited[neighbor]) {
-                Edge edge = { .parent = current_node, .child = neighbor };
+        for (int neighbour = 0; neighbour < nodes_count; neighbour++) {
+            if (adj_matrix[current_node][neighbour] > 0 && !visited[neighbour]) {
+                // Mark as visited and add the edge to the tree edges
+                visited[neighbour] = true;
+                Edge edge = { .parent = current_node, .child = neighbour };
                 tree_edges->push_back(edge);
-                stack.push(neighbor);
+
+                // Push the neighbor to the stack to continue DFS from this node later
+                stack.push(neighbour);
             }
         }
     }
-}*/
+}
 
-static void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int current_node, vector<Edge> *tree_edges) {
+// Recursive version.
+/*static void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int current_node, vector<Edge> *tree_edges) {
     visited[current_node] = true;
     for (int neighbour = 0; neighbour < nodes_count; neighbour++) {
         if (adj_matrix[current_node][neighbour] > 0 && !visited[neighbour]) {
@@ -568,7 +573,7 @@ static void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int cur
             dfs_tree(adj_matrix, nodes_count, visited, neighbour, tree_edges);
         }
     }
-}
+}*/
 
 uint64_t combinations(int n_edges, int k_nodes) {
     mpz_t n_fact, k_fact, n_minus_k_fact, denom, result;
