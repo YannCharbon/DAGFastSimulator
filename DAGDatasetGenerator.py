@@ -109,8 +109,9 @@ class DAGDatasetGenerator:
                 rssi_edges = dict()
                 for edge in best_dag:
                    rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
-                G = nx.DiGraph()
-                G.add_edges_from(best_dag)
+                G = nx.from_numpy_array(adj_matrix, 'rssi',create_using=nx.MultiDiGraph)
+                #G = nx.DiGraph()
+                G.add_edges_from(best_dag, link_type='dag')
                 nx.set_edge_attributes(G, rssi_edges, 'rssi')
                 futures.remove(future)
                 result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
@@ -136,16 +137,15 @@ class DAGDatasetGenerator:
                 best_dag, best_perf, adj_matrix = future.result()
                 rssi_edges = dict()
                 for edge in best_dag:
-                   rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
-                G = nx.DiGraph()
-                G.add_edges_from(best_dag)
-                nx.set_edge_attributes(G, rssi_edges, 'rssi')
+                    edge += (1,) # Use key 1 for the dag and 0 for the topology in the multidigraph
+                    rssi_edges[edge] = {'rssi': float(adj_matrix[edge[0]][edge[1]]), 'edge_type': 'dag'}
+
+                G = nx.from_numpy_array(adj_matrix, edge_attr='rssi',create_using=nx.MultiDiGraph)
+                G.add_edges_from(rssi_edges)
+                nx.set_edge_attributes(G, rssi_edges)
                 futures.remove(future)
-                result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
-                filename = Path(result_name + "_best_dag.csv")
-                nx.write_edgelist(G, dags_path/filename, delimiter=',')
-                filename = Path(result_name + "_adj_matrix.txt")
-                np.savetxt(dags_path/filename, np.array(adj_matrix), delimiter=',')
+                result_name = "topologies_{}.csv".format(datetime.datetime.now()).replace(":", "_")
+                nx.write_edgelist(G, dags_path/Path(result_name), delimiter=',')
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
@@ -275,6 +275,7 @@ class DAGDatasetGenerator:
 
         a = limit_neighbors(a)
 
+        np.fill_diagonal(a, 0.) # Remove all potentials link to itself
         return a, density_factor
 
     def draw_network(self, adj_matrix):
@@ -1238,7 +1239,7 @@ if __name__ == '__main__':
 
     #adj_matrix = np.loadtxt("dags/topologies_2024-11-06 16_29_44.968765_adj_matrix.txt", delimiter=',').tolist()
     #generator.draw_network(adj_matrix)
-    adj_matrix = np.loadtxt("dags/topologies_2024-11-06 16_48_43.661391_adj_matrix.txt", delimiter=',').tolist()
+    #adj_matrix = np.loadtxt("dags/topologies_2024-11-06 16_48_43.661391_adj_matrix.txt", delimiter=',').tolist()
     #generator.draw_network(adj_matrix)
 
 
@@ -1249,11 +1250,11 @@ if __name__ == '__main__':
 
 
     # Get all the possible DAGs within this topology
-    dags_python = generator.generate_subset_dags(adj_matrix, True)
+    #dags_python = generator.generate_subset_dags(adj_matrix, True)
     dags_pure_c = generator.generate_subset_dags_pure_c(adj_matrix, True)
 
 
-    print(f"Number of DAGs generated using Python: {len(dags_python)}")
+    #print(f"Number of DAGs generated using Python: {len(dags_python)}")
     #print(type(dags_python))
     #for digraph in dags_python:
     #    print(digraph.edges())

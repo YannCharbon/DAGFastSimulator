@@ -20,13 +20,13 @@ if __name__ == '__main__':
     #generator.run_parallel(10, 4, int(os.cpu_count()/2))
     #generator.run_parallel(20, 10, int(os.cpu_count()))
     #generator.run_parallel_pure_c(15, 200, int(os.cpu_count()))
-    generator.run_parallel_double_flux_pure_c(18, 50, int(os.cpu_count()))
+    #generator.run_parallel_double_flux_pure_c(18, 50, int(os.cpu_count()))
+    generator.run_parallel_double_flux_pure_c(15, 20, 1)
     # To keep plots open
     #generator.draw_network(adj_matrix)
     #generator.draw_dag(best_dag, adj_matrix)
     #plt.ioff()
     #plt.show()
-    """
     print("Run simulation with telemetry")
     simulation_path = Path('simulation')
     simulation_path.mkdir(exist_ok=True)
@@ -35,4 +35,3 @@ if __name__ == '__main__':
         sim.load_topology(topology)
         sim.run_simulation()
         sim.generate_report(simulation_path / Path(sim.filepath.split('/')[-1].replace('.csv', '_simulation.csv')))
-    """
