@@ -56,8 +56,8 @@ class SimTelemetry:
             neighbors = ""
             for ngh_id in self.tpg.neighbors(node_id):
                 rssi = self.tpg.edges[(node_id, ngh_id)].get('rssi')
-                neighbors += f"{ngh_id}:{rssi},"
-            neighbors = neighbors[:-1] # Remove last semicolon
+                neighbors += f"{ngh_id}:{rssi};"
+            neighbors = neighbors[:-1] # Remove last separator 
             df_report.loc[len(df_report)] = [node_id, node_tm.node_type, node_tm.rank, node_tm.parent, node_tm.rssi, node_tm.tx_success, node_tm.tx_fail, node_tm.collision_avoided, neighbors]
             df_report
         df_report.sort_values(by='node_id').to_csv(filename, index=None)
@@ -132,7 +132,7 @@ class SimTelemetry:
         return avg_steps / epoch_len
 
 
-    def simulate_downlink(self, epoch_len=2, packets_per_node=15, max_steps=-1):
+    def simulate_downlink(self, epoch_len=10, packets_per_node=15, max_steps=-1):
         packets = dict(self.dag.nodes)
         transmitting = dict(self.dag.nodes)  # Track which nodes are currently transmitting
         all_nodes_not_full = [True * len(self.dag.nodes)]
@@ -192,7 +192,7 @@ class SimTelemetry:
     """
     This method combines the UP and DOWN simulations into a single simulation
     """
-    def simulate(self, epoch_len=2, packets_per_node=15, max_steps=-1):
+    def simulate(self, epoch_len=10, packets_per_node=15, max_steps=-1):
         n = len(self.dag.nodes)
 
         packets_up = {node: packets_per_node for node in self.dag.nodes}
