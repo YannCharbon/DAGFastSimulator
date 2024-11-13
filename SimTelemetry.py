@@ -17,11 +17,11 @@ class SimTelemetry:
         self.tpg = nx.DiGraph()
         self.tpg.add_nodes_from(data.nodes)
         for u,v,k, labels in data.edges(keys=True, data=True): # k = 0 topology, k = 1 dag
-            rssi = labels.get('rssi')
+            link_quality = labels.get('link_quality')
             if k == 0:
-                self.tpg.add_edge(u, v, rssi=rssi)
+                self.tpg.add_edge(u, v, link_quality=link_quality)
             else:
-                self.dag.add_edge(u, v, rssi=rssi)
+                self.dag.add_edge(u, v, link_quality=link_quality)
 
         self.nodes_telemetry = {node_id: NodeTelemetry() if node_id != root_id else NodeTelemetry(EnumNodeType.BR) for node_id in self.dag.nodes}
 
@@ -30,7 +30,7 @@ class SimTelemetry:
             self.nodes_telemetry[node].rank = nx.shortest_path_length(self.dag, target=node, source=root_id) if node != root_id else 0
             parent = list(self.dag.predecessors(node))
             if len(parent) > 0:
-                self.nodes_telemetry[node].rssi = self.dag.edges[(parent[0], node)]['rssi']
+                self.nodes_telemetry[node].link_quality = self.dag.edges[(parent[0], node)]['link_quality']
                 self.nodes_telemetry[node].parent = parent[0]
 
     def incr_fail_tx(self, node_id: int):
@@ -51,14 +51,14 @@ class SimTelemetry:
         self.simulate()
 
     def generate_report(self, filename: str):
-        df_report = pd.DataFrame(columns=['node_id', 'node_type', 'rank', 'parent', 'rssi', 'tx_success', 'tx_failure', 'collision_avoided', 'neighbors'])
+        df_report = pd.DataFrame(columns=['node_id', 'node_type', 'rank', 'parent', 'link_quality', 'tx_success', 'tx_failure', 'collision_avoided', 'neighbors'])
         for node_id, node_tm in self.nodes_telemetry.items():
             neighbors = ""
             for ngh_id in self.tpg.neighbors(node_id):
-                rssi = self.tpg.edges[(node_id, ngh_id)].get('rssi')
-                neighbors += f"{ngh_id}:{rssi};"
-            neighbors = neighbors[:-1] # Remove last separator 
-            df_report.loc[len(df_report)] = [node_id, node_tm.node_type, node_tm.rank, node_tm.parent, node_tm.rssi, node_tm.tx_success, node_tm.tx_fail, node_tm.collision_avoided, neighbors]
+                link_quality = self.tpg.edges[(node_id, ngh_id)].get('link_quality')
+                neighbors += f"{ngh_id}:{link_quality};"
+            neighbors = neighbors[:-1] # Remove last separator
+            df_report.loc[len(df_report)] = [node_id, node_tm.node_type, node_tm.rank, node_tm.parent, node_tm.link_quality, node_tm.tx_success, node_tm.tx_fail, node_tm.collision_avoided, neighbors]
             df_report
         df_report.sort_values(by='node_id').to_csv(filename, index=None)
 
@@ -108,9 +108,9 @@ class SimTelemetry:
                         transmitting_child = random.choice(children_transmit_intents)
 
                     if transmitting_child >= 0:
-                        # Determine if transmission is successful based on RSSI
-                        rssi = self.dag.edges[(parent,transmitting_child)]['rssi']  # Get RSSI value for the link
-                        transmission_success = random.random() <= rssi
+                        # Determine if transmission is successful based on Link Quality
+                        link_quality = self.dag.edges[(parent,transmitting_child)]['link_quality']  # Get Link Quality value for the link
+                        transmission_success = random.random() <= link_quality
 
                         if transmission_success:
                             self.incr_success_tx(transmitting_child)
@@ -167,9 +167,9 @@ class SimTelemetry:
                             child = random.choice(children)
 
                             if not transmitting[child]:  # Check if the child is not currently transmitting
-                                # Determine if transmission is successful based on RSSI
-                                rssi = self.dag.edges[(node, child)]['rssi']  # Get RSSI value for the link
-                                transmission_success = random.random() <= rssi
+                                # Determine if transmission is successful based on Link Quality
+                                link_quality = self.dag.edges[(node, child)]['link_quality']  # Get Link Quality value for the link
+                                transmission_success = random.random() <= link_quality
 
                                 if transmission_success and packets[child] < packets_per_node:
                                     packets[child] += 1
@@ -248,9 +248,9 @@ class SimTelemetry:
                             transmitting_child = random.choice(children_transmit_intents)
 
                         if transmitting_child >= 0:
-                            # Determine if transmission is successful based on RSSI
-                            rssi = self.dag.edges[(parent,transmitting_child)]['rssi']  # Get RSSI value for the link
-                            transmission_success = random.random() <= rssi
+                            # Determine if transmission is successful based on Link Quality
+                            link_quality = self.dag.edges[(parent,transmitting_child)]['link_quality']  # Get Link Quality value for the link
+                            transmission_success = random.random() <= link_quality
 
                             if transmission_success:
                                 self.incr_success_tx(transmitting_child)
@@ -269,9 +269,9 @@ class SimTelemetry:
                                 child = random.choice(children)
 
                                 if not transmitting[child]:  # Check if the child is not currently transmitting
-                                    # Determine if transmission is successful based on RSSI
-                                    rssi = self.dag.edges[(node, child)]['rssi']  # Get RSSI value for the link
-                                    transmission_success = random.random() <= rssi
+                                    # Determine if transmission is successful based on Link Quality
+                                    link_quality = self.dag.edges[(node, child)]['link_quality']  # Get Link Quality value for the link
+                                    transmission_success = random.random() <= link_quality
 
                                     if transmission_success and packets_down[child] < packets_per_node:
                                         packets_down[child] += 1
@@ -316,7 +316,7 @@ class NodeTelemetry:
     def __init__(self, nodeType : EnumNodeType = EnumNodeType.NODE):
         self.node_type = nodeType
         self.parent = -1
-        self.rssi = -1
+        self.link_quality = -1
         self.rank = -1
         self.tx_fail = 0
         self.tx_success = 0

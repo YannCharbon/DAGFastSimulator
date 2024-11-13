@@ -80,10 +80,10 @@ class DAGDatasetGenerator:
             futures = {executor.submit(self.run_once_with_adaptive_steps, n) for i in range(count)}
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
-                rssi_edges = dict()
+                link_quality_edges = dict()
                 for edge in best_dag.edges:
-                   rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
-                nx.set_edge_attributes(best_dag, rssi_edges, 'rssi')
+                   link_quality_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
+                nx.set_edge_attributes(best_dag, link_quality_edges, 'link_quality')
                 futures.remove(future)
                 result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
                 filename = Path(result_name + "_best_dag.csv")
@@ -106,13 +106,13 @@ class DAGDatasetGenerator:
             futures = {executor.submit(self.run_once_with_adaptive_steps_pure_c, n) for i in range(count)}
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
-                rssi_edges = dict()
+                link_quality_edges = dict()
                 for edge in best_dag:
-                   rssi_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
-                G = nx.from_numpy_array(adj_matrix, 'rssi',create_using=nx.MultiDiGraph)
+                   link_quality_edges[edge] = float(adj_matrix[edge[0]][edge[1]])
+                G = nx.from_numpy_array(adj_matrix, 'link_quality',create_using=nx.MultiDiGraph)
                 #G = nx.DiGraph()
                 G.add_edges_from(best_dag, link_type='dag')
-                nx.set_edge_attributes(G, rssi_edges, 'rssi')
+                nx.set_edge_attributes(G, link_quality_edges, 'link_quality')
                 futures.remove(future)
                 result_name = "topologies_{}".format(datetime.datetime.now()).replace(":", "_")
                 filename = Path(result_name + "_best_dag.csv")
@@ -135,14 +135,14 @@ class DAGDatasetGenerator:
             futures = {executor.submit(self.run_once_with_adaptive_steps_double_flux_pure_c, n) for i in range(count)}
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
-                rssi_edges = dict()
+                link_quality_edges = dict()
                 for edge in best_dag:
                     edge += (1,) # Use key 1 for the dag and 0 for the topology in the multidigraph
-                    rssi_edges[edge] = {'rssi': float(adj_matrix[edge[0]][edge[1]]), 'edge_type': 'dag'}
+                    link_quality_edges[edge] = {'link_quality': float(adj_matrix[edge[0]][edge[1]]), 'edge_type': 'dag'}
 
-                G = nx.from_numpy_array(adj_matrix, edge_attr='rssi',create_using=nx.MultiDiGraph)
-                G.add_edges_from(rssi_edges)
-                nx.set_edge_attributes(G, rssi_edges)
+                G = nx.from_numpy_array(adj_matrix, edge_attr='link_quality',create_using=nx.MultiDiGraph)
+                G.add_edges_from(link_quality_edges)
+                nx.set_edge_attributes(G, link_quality_edges)
                 futures.remove(future)
                 result_name = "topologies_{}.csv".format(datetime.datetime.now()).replace(":", "_")
                 nx.write_edgelist(G, dags_path/Path(result_name), delimiter=',')
@@ -261,7 +261,7 @@ class DAGDatasetGenerator:
                     a[:, i][to_zero] = 0  # Symmetrize manually
             return a
 
-        # RSSI with best quality = 1.0 No connection = 0.0
+        # Link with best quality = 1.0 No connection = 0.0
         # the ' - 2 * np.random.rand()' controls the density of the interconnections
         rng = np.random.default_rng() # Required in multiprocessing to avoid having same random values in all processes
         density_factor = rng.random()
@@ -275,6 +275,17 @@ class DAGDatasetGenerator:
 
         a = limit_neighbors(a)
 
+        # Rescale link quality between 0.85 and 1.0 (values below represent a loss which is not realistic in reality)
+        # Rescale values strictly greater than 0.0 to be between 0.85 and 1.0
+        new_min, new_max = 0.85, 1.0    # New range
+
+        # Apply rescaling only to elements greater than 0.0
+        a = np.where(
+            a > 0.0,
+            a * (new_max - new_min) + new_min,
+            a
+        )
+
         np.fill_diagonal(a, 0.) # Remove all potentials link to itself
         return a, density_factor
 
@@ -287,7 +298,7 @@ class DAGDatasetGenerator:
         for i in range(len(adj_matrix)):
             G.add_node(i)
 
-        # Add edges with RSSI as weight
+        # Add edges with Link Quality as weight
         for i in range(len(adj_matrix)):
             for j in range(i + 1, len(adj_matrix)):
                 if adj_matrix[i][j] > 0:  # There is a link
@@ -306,11 +317,11 @@ class DAGDatasetGenerator:
         # Draw labels
         nx.draw_networkx_labels(G, pos, font_size=20, font_family="sans-serif")
 
-        # Draw edge labels with RSSI values
+        # Draw edge labels with Link Quality values
         edge_labels = {(i, j): f"{data['weight']:.2f}" for i, j, data in edges}
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
 
-        plt.title("Network Topology with RSSI Values")
+        plt.title("Network Topology with Link Quality Values")
         plt.show(block=True)
 
     def generate_dags(self, adj_matrix):
@@ -502,9 +513,9 @@ class DAGDatasetGenerator:
                         transmitting_child = random.choice(children_transmit_intents)
 
                     if transmitting_child >= 0:
-                        # Determine if transmission is successful based on RSSI
-                        rssi = adj_matrix[parent][transmitting_child]  # Get RSSI value for the link
-                        transmission_success = random.random() <= rssi
+                        # Determine if transmission is successful based on Link Quality
+                        link_quality = adj_matrix[parent][transmitting_child]  # Get Link Quality value for the link
+                        transmission_success = random.random() <= link_quality
 
                         if transmission_success:
                             packets[parent] += 1
@@ -581,9 +592,9 @@ class DAGDatasetGenerator:
                             child = random.choice(children)
 
                             if not transmitting[child]:  # Check if the child is not currently transmitting
-                                # Determine if transmission is successful based on RSSI
-                                rssi = adj_matrix[node][child]  # Get RSSI value for the link
-                                transmission_success = random.random() <= rssi
+                                # Determine if transmission is successful based on Link Quality
+                                link_quality = adj_matrix[node][child]  # Get Link Quality value for the link
+                                transmission_success = random.random() <= link_quality
 
                                 if transmission_success and packets[child] < packets_per_node:
                                     packets[child] += 1
@@ -666,9 +677,9 @@ class DAGDatasetGenerator:
                             transmitting_child = random.choice(children_transmit_intents)
 
                         if transmitting_child >= 0:
-                            # Determine if transmission is successful based on RSSI
-                            rssi = adj_matrix[parent][transmitting_child]  # Get RSSI value for the link
-                            transmission_success = random.random() <= rssi
+                            # Determine if transmission is successful based on Link Quality
+                            link_quality = adj_matrix[parent][transmitting_child]  # Get Link Quality value for the link
+                            transmission_success = random.random() <= link_quality
 
                             if transmission_success:
                                 packets_up[parent] += 1
@@ -685,9 +696,9 @@ class DAGDatasetGenerator:
                                 child = random.choice(children)
 
                                 if not transmitting[child]:  # Check if the child is not currently transmitting
-                                    # Determine if transmission is successful based on RSSI
-                                    rssi = adj_matrix[node][child]  # Get RSSI value for the link
-                                    transmission_success = random.random() <= rssi
+                                    # Determine if transmission is successful based on Link Quality
+                                    link_quality = adj_matrix[node][child]  # Get Link Quality value for the link
+                                    transmission_success = random.random() <= link_quality
 
                                     if transmission_success and packets_down[child] < packets_per_node:
                                         packets_down[child] += 1
