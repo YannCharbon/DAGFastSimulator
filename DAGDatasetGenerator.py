@@ -705,6 +705,8 @@ class DAGDatasetGenerator:
                                         packets_down[node] -= 1
                                         transmitting[child] = True  # Mark the child as transmitting. It is also the case when transmission success is false because it simulates a collision
 
+                                    transmitting[parent] = True # Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
+
 
                 # Reset the transmitting and receiving status for the next step
                 transmitting = {node: False for node in G.nodes}
