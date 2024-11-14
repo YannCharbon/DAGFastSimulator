@@ -39,8 +39,8 @@ class SimTelemetry:
     def incr_success_tx(self, node_id: int):
         self.nodes_telemetry[node_id].tx_success +=1
 
-    def incr_collision_avoided(self, node_id: int):
-        self.nodes_telemetry[node_id].collision_avoided +=1
+    def incr_retransmissions(self, node_id: int):
+        self.nodes_telemetry[node_id].retransmissions +=1
 
     def set_node_rank(self, node_id: int, rank: int):
         self.nodes_telemetry[node_id].rank = rank
@@ -51,14 +51,14 @@ class SimTelemetry:
         self.simulate()
 
     def generate_report(self, filename: str):
-        df_report = pd.DataFrame(columns=['node_id', 'node_type', 'rank', 'parent', 'link_quality', 'tx_success', 'tx_failure', 'collision_avoided', 'neighbors'])
+        df_report = pd.DataFrame(columns=['node_id', 'node_type', 'rank', 'parent', 'link_quality', 'tx_success', 'tx_failure', 'retransmissions', 'neighbors'])
         for node_id, node_tm in self.nodes_telemetry.items():
             neighbors = ""
             for ngh_id in self.tpg.neighbors(node_id):
                 link_quality = self.tpg.edges[(node_id, ngh_id)].get('link_quality')
                 neighbors += f"{ngh_id}:{link_quality};"
             neighbors = neighbors[:-1] # Remove last separator
-            df_report.loc[len(df_report)] = [node_id, node_tm.node_type, node_tm.rank, node_tm.parent, node_tm.link_quality, node_tm.tx_success, node_tm.tx_fail, node_tm.collision_avoided, neighbors]
+            df_report.loc[len(df_report)] = [node_id, node_tm.node_type, node_tm.rank, node_tm.parent, node_tm.link_quality, node_tm.tx_success, node_tm.tx_fail, node_tm.retransmissions, neighbors]
             df_report
         df_report.sort_values(by='node_id').to_csv(filename, index=None)
 
@@ -97,9 +97,6 @@ class SimTelemetry:
                 np.random.shuffle(r)
                 for i in r:
                     parent = list(self.dag.nodes)[i]
-                    # TODO: Increment collision_avoided for a selected child node
-                    if transmitting[parent] == True:
-                        continue
 
                     children = list(self.dag.successors(parent))
                     transmitting_child = -1
@@ -108,6 +105,9 @@ class SimTelemetry:
                         transmitting_child = random.choice(children_transmit_intents)
 
                     if transmitting_child >= 0:
+                        if transmitting[parent] == True:
+                            self.incr_retransmissions(transmitting_child)
+                            continue
                         # Determine if transmission is successful based on Link Quality
                         link_quality = self.dag.edges[(parent,transmitting_child)]['link_quality']  # Get Link Quality value for the link
                         transmission_success = random.random() <= link_quality
@@ -179,8 +179,8 @@ class SimTelemetry:
                                 elif packets[child] < packets_per_node: # We don't want to incremente failed tx if all packets have been received by the child node
                                     self.incr_fail_tx(node)
                             else:
-                                # Collision avoided
-                                self.incr_collision_avoided(node)
+                                # Retranssmissions
+                                self.incr_retransmissions(node)
 
                 # Reset the transmitting status for the next step
                 transmitting = {node: False for node in self.dag.nodes}
@@ -239,8 +239,7 @@ class SimTelemetry:
 
                     if up_not_down == True: # UP
                         parent = list(self.dag.nodes)[i]
-                        if transmitting[parent] == True:
-                            continue
+
                         children = list(self.dag.successors(parent))
                         transmitting_child = -1
                         children_transmit_intents = [child for child in children if transmit_intent_up[child] == True]
@@ -248,6 +247,9 @@ class SimTelemetry:
                             transmitting_child = random.choice(children_transmit_intents)
 
                         if transmitting_child >= 0:
+                            if transmitting[parent] == True:
+                                self.incr_retransmissions(transmitting_child)
+                                continue
                             # Determine if transmission is successful based on Link Quality
                             link_quality = self.dag.edges[(parent,transmitting_child)]['link_quality']  # Get Link Quality value for the link
                             transmission_success = random.random() <= link_quality
@@ -257,8 +259,11 @@ class SimTelemetry:
                                 packets_up[parent] += 1
                                 packets_up[transmitting_child] -= 1
                                 transmit_intent_up[transmitting_child] = False
+                                transmitting[parent] = True # Parent is not actually transmitting, but it is busy while receiving from child
                             else:
                                 self.incr_fail_tx(transmitting_child)
+
+                            transmitting[transmitting_child] = True
 
                     else:   # DOWN
                         node = list(self.dag.nodes)[i]
@@ -281,8 +286,10 @@ class SimTelemetry:
 
                                     elif packets_down[child] < packets_per_node: # We don't want to incremente failed tx if all packets have been received by the child node
                                         self.incr_fail_tx(node)
+
+                                    transmitting[node] = True # Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
                                 else:
-                                    self.incr_collision_avoided(node)
+                                    self.incr_retransmissions(node)
 
 
                 # Reset the transmitting and receiving status for the next step
@@ -320,7 +327,7 @@ class NodeTelemetry:
         self.rank = -1
         self.tx_fail = 0
         self.tx_success = 0
-        self.collision_avoided = 0
+        self.retransmissions = 0
 
 if __name__ == '__main__':
     sim = SimTelemetry()
