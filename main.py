@@ -21,7 +21,7 @@ if __name__ == '__main__':
     #generator.run_parallel(20, 10, int(os.cpu_count()))
     #generator.run_parallel_pure_c(15, 200, int(os.cpu_count()))
     #generator.run_parallel_double_flux_pure_c(18, 50, int(os.cpu_count()))
-    generator.run_parallel_double_flux_pure_c(20, 20, int(os.cpu_count()))
+    generator.run_parallel_double_flux_pure_c(12, 5000, int(1), False)
     # To keep plots open
     #generator.draw_network(adj_matrix)
     #generator.draw_dag(best_dag, adj_matrix)

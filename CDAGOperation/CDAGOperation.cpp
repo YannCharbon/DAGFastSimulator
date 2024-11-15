@@ -28,6 +28,10 @@ using namespace std;
 #define LOG_TIMINGS     0
 #endif
 
+#ifndef VERBOSE
+#define VERBOSE     0
+#endif
+
 
 class CombinationIterator {
 public:
@@ -642,6 +646,13 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
     int n_edges = all_edges.size();
     int k_nodes = nodes_count - 1;
 
+    if (n_edges < k_nodes) {
+#if VERBOSE == 1
+        printf("Error: Not enough edges to connect every node. Skipping.\n");
+#endif
+        return NULL;
+    }
+
     uint64_t total_combinations = combinations(n_edges, k_nodes);
     CombinationIterator comb_iter(all_edges, k_nodes);
 #if LOG_TIMINGS > 0
@@ -649,7 +660,9 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
     printf("C - Took %ld [us] to init and compute combinations\n", end_of_combination_computation - start_time);
 
 #endif
+#if VERBOSE == 1
     printf("total_combinations %ld n_edges %d k_nodes %d\n", total_combinations, n_edges, k_nodes);
+#endif
 
 #if LOG_TIMINGS > 0
     long start_of_tree_matrix_generation = get_microseconds();

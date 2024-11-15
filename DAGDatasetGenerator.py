@@ -126,13 +126,15 @@ class DAGDatasetGenerator:
     """
     Run the simulation in parallel with pure C double flux simulation
     """
-    def run_parallel_double_flux_pure_c(self, n, count, max_workers=os.cpu_count()):
+    def run_parallel_double_flux_pure_c(self, n, count, max_workers=os.cpu_count(), verbose=False):
         dags_path = Path('dags')
         dags_path.mkdir(exist_ok=True)
 
+        generated_count = 0
+
         start_time = time.time()
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self.run_once_with_adaptive_steps_double_flux_pure_c, n) for i in range(count)}
+            futures = {executor.submit(self.run_once_with_adaptive_steps_double_flux_pure_c, n, verbose) for i in range(count)}
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
                 link_quality_edges = dict()
@@ -146,6 +148,11 @@ class DAGDatasetGenerator:
                 futures.remove(future)
                 result_name = "topologies_{}.csv".format(datetime.datetime.now()).replace(":", "_")
                 nx.write_edgelist(G, dags_path/Path(result_name), delimiter=',')
+
+                generated_count += 1
+
+                if verbose == False:
+                    print(f"Status: [{generated_count} / {count}]", end='\r')
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
@@ -211,23 +218,26 @@ class DAGDatasetGenerator:
 
         return best_dag, best_perf, adj_matrix
 
-    def run_once_with_adaptive_steps_double_flux_pure_c(self, n):
+    def run_once_with_adaptive_steps_double_flux_pure_c(self, n, verbose=False):
         dags = []
         adj_matrix = []
         while (len(dags) == 0):
             # Generate a random adjacency matrix
             adj_matrix, density_factor = self.generate_random_adj_matrix(n)
-            print("Density factor = {}".format(density_factor))
+            if verbose:
+                print("Density factor = {}".format(density_factor))
 
             # Get all the possible DAGs within this topology
             dags = self.generate_subset_dags_pure_c(adj_matrix)
-            print(f"Number of DAGs generated: {len(dags)}")
+            if verbose:
+                print(f"Number of DAGs generated: {len(dags)}")
 
         # Compute the best performing DAG within the topology
-        best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(dags, adj_matrix)
-        print("best dag is {} perf = {}".format(best_dag, best_perf))
-        np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
-        print(adj_matrix)
+        best_dag, best_perf = self.get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(dags, adj_matrix, verbose=verbose)
+        if verbose:
+            print("best dag is {} perf = {}".format(best_dag, best_perf))
+            np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
+            print(adj_matrix)
 
         return best_dag, best_perf, adj_matrix
 
@@ -261,16 +271,25 @@ class DAGDatasetGenerator:
                     a[:, i][to_zero] = 0  # Symmetrize manually
             return a
 
+        # Init matrix
+        a = np.zeros((n, n))
+
         # Link with best quality = 1.0 No connection = 0.0
         # the ' - 2 * np.random.rand()' controls the density of the interconnections
         rng = np.random.default_rng() # Required in multiprocessing to avoid having same random values in all processes
-        density_factor = rng.random()
-        a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
+
+        # A potential valid matrix must have at least enough edges to interconnect each node in the topology
+        while np.asarray(a > 0.0).sum() < n - 1:
+            density_factor = rng.random()
+            a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
+
         a = symmetrize(a)
 
         while not check_integrity(a):
             density_factor = rng.random()
             a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
+            if np.asarray(a > 0.0).sum() < n - 1:
+                continue
             a = symmetrize(a)
 
         a = limit_neighbors(a)
@@ -1164,7 +1183,7 @@ class DAGDatasetGenerator:
 
         return best_dag, best_perf
 
-    def get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1):
+    def get_best_dag_parallel_with_adaptative_steps_double_flux_pure_c(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1, verbose=False):
         start_time = time.time()
 
         dll_name = "CDAGOperation/libCDAGOperation.so"
@@ -1189,7 +1208,8 @@ class DAGDatasetGenerator:
                     *[Edge(parent, child) for parent, child in dag]
                 )
                 max_steps = int(min(lib.evaluate_dag_performance_up_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, -1), max_steps))
-            print("Max steps = " + str(max_steps))
+            if verbose:
+                print("Max steps = " + str(max_steps))
         else:
             max_steps = -1
 
@@ -1225,9 +1245,9 @@ class DAGDatasetGenerator:
         best_dag, best_perf = min(results, key=lambda x: x[1])
 
         end_time = time.time()
-        print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
+        #print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
 
-        print("Info: best DAG perf {}".format(best_perf))
+        #print("Info: best DAG perf {}".format(best_perf))
 
         return best_dag, best_perf
 
