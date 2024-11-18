@@ -141,6 +141,28 @@ static bool transmission_success(float link_quality) {
     return false;
 }
 
+static int compute_sparsity_metric(const int *array, int size) {
+    if (size <= 0) {
+        return 0; // Handle empty array case
+    }
+
+    int sum = 0;
+    for (int i = 0; i < size; i++) {
+        sum += array[i];
+    }
+
+    // Integer division for the mean
+    int mean = sum / size;
+
+    int abs_dev_sum = 0;
+    for (int i = 0; i < size; i++) {
+        abs_dev_sum += abs(array[i] - mean);
+    }
+
+    // Return the average absolute deviation
+    return abs_dev_sum / size;
+}
+
 
 /**
     Uplink global bandwidth measurement.
@@ -616,7 +638,7 @@ static bool all_values_true(bool *array, int array_len) {
 }
 
 
-Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_dags_count, bool test_mode) {
+Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_dags_count, bool test_mode, bool no_skip) {
 #if LOG_TIMINGS > 0
     long start_time = get_microseconds();
 #endif
@@ -730,18 +752,20 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
             all_possible_trees.push_back(tree_edges);
         }
 
-        // Progress with iterator by a random jump (scale by the number of nodes and number of edges)
-        int64_t total_skip = rand() % (k_nodes * n_edges);
-        if (test_mode) {
-            // Deterministic behaviour
-            total_skip = (int64_t)((k_nodes * n_edges) / 2);
-        }
+        if (!no_skip){
+            // Progress with iterator by a random jump (scale by the number of nodes and number of edges)
+            int64_t total_skip = rand() % (k_nodes * n_edges);
+            if (test_mode) {
+                // Deterministic behaviour
+                total_skip = (int64_t)((k_nodes * n_edges) / 2);
+            }
 #if LOG_TIMINGS == 2
-        step_5 = get_microseconds();
+            step_5 = get_microseconds();
 #endif
-        comb_iter.skipCombinations(total_skip);
-        if (!comb_iter.hasNext()) {
-            break;
+            comb_iter.skipCombinations(total_skip);
+            if (!comb_iter.hasNext()) {
+                break;
+            }
         }
 
         tree_edges.clear();
