@@ -1,6 +1,8 @@
 import sys
 import numpy as np
 import networkx as nx
+from networkx.drawing.nx_agraph import graphviz_layout
+import pydot
 import matplotlib.pyplot as plt
 import itertools
 from itertools import permutations, combinations
@@ -309,9 +311,11 @@ class DAGDatasetGenerator:
         return a, density_factor
 
     def draw_network(self, adj_matrix):
-        plt.figure()  # Create a new figure
+        plt.figure(figsize=(10,10))  # Create a new figure
 
         G = nx.Graph()
+        G.graph["ranksep"] = "1.7"  # Vertical space between ranks
+        G.graph["nodesep"] = "0.8"  # Horizontal space between nodes
 
         # Add nodes
         for i in range(len(adj_matrix)):
@@ -324,17 +328,18 @@ class DAGDatasetGenerator:
                     G.add_edge(i, j, weight=adj_matrix[i][j])
 
         # Draw the network
-        pos = nx.shell_layout(G)  # Positions for all nodes
+        pos = graphviz_layout(G, prog="fdp")
+        #pos = nx.shell_layout(G)  # Positions for all nodes
 
         # Draw nodes
-        nx.draw_networkx_nodes(G, pos, node_size=700)
+        nx.draw_networkx_nodes(G, pos, node_size=400)
 
         # Draw edges
         edges = G.edges(data=True)
         nx.draw_networkx_edges(G, pos, edgelist=edges)
 
         # Draw labels
-        nx.draw_networkx_labels(G, pos, font_size=20, font_family="sans-serif")
+        nx.draw_networkx_labels(G, pos, font_size=15, font_family="sans-serif")
 
         # Draw edge labels with Link Quality values
         edge_labels = {(i, j): f"{data['weight']:.2f}" for i, j, data in edges}
@@ -434,12 +439,12 @@ class DAGDatasetGenerator:
 
         return all_possible_trees
 
-    def generate_subset_dags_pure_c(self, adj_matrix, test_mode=False):
+    def generate_subset_dags_pure_c(self, adj_matrix, test_mode=False, no_skip=False):
         dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
-        lib.generate_subset_dags.argtypes = (ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_bool)
+        lib.generate_subset_dags.argtypes = (ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_bool, ctypes.c_bool)
         lib.generate_subset_dags.restype = ctypes.POINTER(ctypes.POINTER(Edge))
 
         lib.free_all_possible_tree.argtypes = (ctypes.POINTER(ctypes.POINTER(Edge)), ctypes.c_int)
@@ -452,7 +457,7 @@ class DAGDatasetGenerator:
         generated_dags_count = 0
         generated_dags_count_c = ctypes.c_int(generated_dags_count)
 
-        all_possible_dags_c = lib.generate_subset_dags(adj_matrix_c, len(adj_matrix[0]), ctypes.pointer(generated_dags_count_c), test_mode)
+        all_possible_dags_c = lib.generate_subset_dags(adj_matrix_c, len(adj_matrix[0]), ctypes.pointer(generated_dags_count_c), test_mode, no_skip)
 
         # Convert the C result back to Python list of lists
         all_possible_dags = []
@@ -467,18 +472,22 @@ class DAGDatasetGenerator:
         return all_possible_dags
 
     def draw_dag(self, G, adj_matrix):
-        plt.figure()
-        pos = nx.shell_layout(G)
-        nx.draw(G, pos, with_labels=True, node_size=700, node_color="lightblue", font_size=15)
+        plt.figure(figsize=(10, 10))
+        G.graph["ranksep"] = "1.7"  # Vertical space between ranks
+        G.graph["nodesep"] = "0.8"  # Horizontal space between nodes
+        pos = graphviz_layout(G, prog="dot")
+        nx.draw(G, pos, with_labels=True, node_size=400, node_color="lightblue", font_size=15)
         nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): f"{adj_matrix[u][v]:.2f}" for u, v in G.edges()})
         plt.title("Single DAG")
         plt.show(block=False)
 
     def draw_all_dags(self, dags, adj_matrix):
         for i, G in enumerate(dags):
-            plt.figure()
-            pos = nx.shell_layout(G)
-            nx.draw(G, pos, with_labels=True, node_size=700, node_color="lightblue", font_size=15)
+            plt.figure(figsize=(10, 10))
+            G.graph["ranksep"] = "1.7"  # Vertical space between ranks
+            G.graph["nodesep"] = "0.8"  # Horizontal space between nodes
+            pos = graphviz_layout(G, prog="dot")
+            nx.draw(G, pos, with_labels=True, node_size=400, node_color="lightblue", font_size=15)
             nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): f"{adj_matrix[u][v]:.2f}" for u, v in G.edges()})
             plt.title(f"DAG {i+1}")
             plt.show(block=False)
@@ -495,7 +504,9 @@ class DAGDatasetGenerator:
         packets_per_node (int): Initial packet count in each node queue
         max_steps (int): Early stop condition. This helps not to run simulation uselessly if the number of steps is above a provided threshold. This can be dynamically updated when more and more DAGs have been evaluated to spare time.
     """
-    def evaluate_dag_performance_up(self, G, adj_matrix, epoch_len=2, packets_per_node=15, max_steps=-1):
+    def evaluate_dag_performance_up(self, dag, adj_matrix, epoch_len=2, packets_per_node=15, max_steps=-1):
+        G = nx.DiGraph()
+        G.add_edges_from(dag)
         n = len(G.nodes)
 
         packets = {node: packets_per_node for node in G.nodes}
@@ -576,7 +587,9 @@ class DAGDatasetGenerator:
         packets_per_node (int): Final packet count required in each node queue to end simulation
         max_steps (int): Early stop condition. This helps not to run simulation uselessly if the number of steps is above a provided threshold. This can be dynamically updated when more and more DAGs have been evaluated to spare time.
     """
-    def evaluate_dag_performance_down(self, G, adj_matrix, epoch_len=2, packets_per_node=15, max_steps=-1):
+    def evaluate_dag_performance_down(self, dag, adj_matrix, epoch_len=2, packets_per_node=15, max_steps=-1):
+        G = nx.DiGraph()
+        G.add_edges_from(dag)
         n = len(G.nodes)
 
         packets = {node: 0 for node in G.nodes}
@@ -843,14 +856,21 @@ class DAGDatasetGenerator:
     def cython_get_best_dag_parallel_up_down(self, dags, adj_matrix):
         start_time = time.time()
 
+        dags_g = []
+        for dag in dags:
+            G = nx.DiGraph()
+            G.add_edges_from(dag)
+            dags_g.append(G)
+
         # Pre-compute step threshold. This way we don't compute performance for bad DAGs because it is not relevant and waists execution time.
         max_steps_up = 1e9  # very high value just for initialization
         max_steps_down = 1e9  # very high value just for initialization
         if len(dags) > 800:
             iter = 50 if len(dags) >= 50 else len(dags)
             for _ in range(0, iter):
-                max_steps_up = min(CythonDAGOperation.cython_evaluate_dag_performance_up(random.choice(dags), adj_matrix), max_steps_up)
-                max_steps_down = min(CythonDAGOperation.cython_evaluate_dag_performance_down(random.choice(dags), adj_matrix), max_steps_down)
+                dag_g = random.choice(dags_g)
+                max_steps_up = min(CythonDAGOperation.cython_evaluate_dag_performance_up(dag_g, adj_matrix), max_steps_up)
+                max_steps_down = min(CythonDAGOperation.cython_evaluate_dag_performance_down(dag_g, adj_matrix), max_steps_down)
             print("Max steps = " + str(max_steps_up))
             print("Max steps = " + str(max_steps_down))
         else:
@@ -858,8 +878,8 @@ class DAGDatasetGenerator:
             max_steps_down = -1
 
         # Prepare the arguments as a list of tuples
-        args_up = [(i, dag, adj_matrix, CythonDAGOperation.cython_evaluate_dag_performance_up, max_steps_up) for i, dag in enumerate(dags)]
-        args_down = [(i, dag, adj_matrix, CythonDAGOperation.cython_evaluate_dag_performance_down, max_steps_down) for i, dag in enumerate(dags)]
+        args_up = [(i, dag, adj_matrix, CythonDAGOperation.cython_evaluate_dag_performance_up, max_steps_up) for i, dag in enumerate(dags_g)]
+        args_down = [(i, dag, adj_matrix, CythonDAGOperation.cython_evaluate_dag_performance_down, max_steps_down) for i, dag in enumerate(dags_g)]
 
         # Use a multiprocessing pool to parallelize the evaluation
         with multiprocessing.Pool() as pool:
@@ -993,14 +1013,20 @@ class DAGDatasetGenerator:
 
     def get_best_dag_parallel_with_adaptative_steps(self, dags, adj_matrix, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1):
         start_time = time.time()
+        dags_g = []
+        for dag in dags:
+            G = nx.DiGraph()
+            G.add_edges_from(dag)
+            dags_g.append(G)
+
         # Pre-compute step threshold. This way we don't compute performance for bad DAGs because it is not relevant and waists execution time.
         max_steps_up = 1e9  # very high value just for initialization
         max_steps_down = 1e9  # very high value just for initialization
         if len(dags) > 800:
             iter = 50 if len(dags) >= 50 else len(dags)
             for _ in range(0, iter):
-                max_steps_up = min(CythonDAGOperation.cython_evaluate_dag_performance_up(random.choice(dags), adj_matrix), max_steps_up)
-                max_steps_down = min(CythonDAGOperation.cython_evaluate_dag_performance_down(random.choice(dags), adj_matrix), max_steps_down)
+                max_steps_up = min(CythonDAGOperation.cython_evaluate_dag_performance_up(random.choice(dags_g), adj_matrix), max_steps_up)
+                max_steps_down = min(CythonDAGOperation.cython_evaluate_dag_performance_down(random.choice(dags_g), adj_matrix), max_steps_down)
             print("Max steps = " + str(max_steps_up))
             print("Max steps = " + str(max_steps_down))
         else:
@@ -1015,36 +1041,39 @@ class DAGDatasetGenerator:
                     self.evaluate_dag_performance_combined,
                     CythonDAGOperation.cython_evaluate_dag_performance_up,
                     CythonDAGOperation.cython_evaluate_dag_performance_down,
-                    dags.pop(),
+                    dags_g.pop() if dags_g else None,  # Prevent pop() from failing
                     adj_matrix,
                     max_steps_up=max_steps_up,
                     max_steps_down=max_steps_down)
-                for i in range(min(max_workers, len(dags)))}
-            for future in concurrent.futures.as_completed(futures):
-                current_dag, perf_up, perf_down = future.result()
-                up_results.append((current_dag, perf_up))
-                down_results.append((current_dag, perf_down))
+                for _ in range(min(max_workers, len(dags_g)))  # Use len(dags_g)
+            }
+            while futures:
+                for future in concurrent.futures.as_completed(futures):
+                    current_dag, perf_up, perf_down = future.result()
+                    up_results.append((current_dag, perf_up))
+                    down_results.append((current_dag, perf_down))
 
-                if max_steps_up == -1 and max_steps_down == -1:
-                    max_steps_up = perf_up
-                    max_steps_down = perf_down
+                    if max_steps_up == -1 and max_steps_down == -1:
+                        max_steps_up = perf_up
+                        max_steps_down = perf_down
 
-                if perf_up < max_steps_up:
-                    max_steps_up = perf_up if (perf_up / max_steps_up) > delta_threshold else max_steps_up * (1 - reduce_ratio)
+                    if perf_up < max_steps_up:
+                        max_steps_up = int(perf_up if (perf_up / max_steps_up) > delta_threshold else max_steps_up * (1 - reduce_ratio))
 
-                if perf_down < max_steps_down:
-                    max_steps_down = perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio)
+                    if perf_down < max_steps_down:
+                        max_steps_down = int(perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio))
 
-                futures.remove(future)
-                if len(dags):
-                    futures.add(executor.submit(
-                        self.evaluate_dag_performance_combined,
-                        CythonDAGOperation.cython_evaluate_dag_performance_up,
-                        CythonDAGOperation.cython_evaluate_dag_performance_down,
-                        dags.pop(),
-                        max_steps_up=max_steps_up * margin_max_step,
-                        max_steps_down=max_steps_down * margin_max_step)
-                    )
+                    futures.remove(future)
+                    if dags_g:  # Check if there are remaining DAGs
+                        futures.add(executor.submit(
+                            self.evaluate_dag_performance_combined,
+                            CythonDAGOperation.cython_evaluate_dag_performance_up,
+                            CythonDAGOperation.cython_evaluate_dag_performance_down,
+                            dags_g.pop(),
+                            adj_matrix,
+                            max_steps_up=int(max_steps_up * margin_max_step),
+                            max_steps_down=int(max_steps_down * margin_max_step))
+                        )
 
         # Combine the two lists
         up_results_np = np.array([item[1] for item in up_results]).astype(float)
@@ -1126,29 +1155,31 @@ class DAGDatasetGenerator:
                     max_steps_up=max_steps_up,
                     max_steps_down=max_steps_down)
                 for i in range(min(max_workers, len(dags)))}
-            for future in concurrent.futures.as_completed(futures):
-                current_dag, perf_up, perf_down = future.result()
-                up_results.append((current_dag, perf_up))
-                down_results.append((current_dag, perf_down))
+            while futures:
+                for future in concurrent.futures.as_completed(futures):
+                    current_dag, perf_up, perf_down = future.result()
+                    up_results.append((current_dag, perf_up))
+                    down_results.append((current_dag, perf_down))
 
-                if max_steps_up == -1 and max_steps_down == -1:
-                    max_steps_up = perf_up
-                    max_steps_down = perf_down
+                    if max_steps_up == -1 and max_steps_down == -1:
+                        max_steps_up = perf_up
+                        max_steps_down = perf_down
 
-                if perf_up < max_steps_up:
-                    max_steps_up = perf_up if (perf_up / max_steps_up) > delta_threshold else max_steps_up * (1 - reduce_ratio)
+                    if perf_up < max_steps_up:
+                        max_steps_up = int(perf_up if (perf_up / max_steps_up) > delta_threshold else max_steps_up * (1 - reduce_ratio))
 
-                if perf_down < max_steps_down:
-                    max_steps_down = perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio)
+                    if perf_down < max_steps_down:
+                        max_steps_down = int(perf_down if (perf_down / max_steps_down) > delta_threshold else max_steps_down * (1 - reduce_ratio))
 
-                futures.remove(future)
-                if len(dags):
-                    futures.add(executor.submit(
-                        self.evaluate_dag_performance_combined_pure_c,
-                        dags.pop(),
-                        max_steps_up=max_steps_up * margin_max_step,
-                        max_steps_down=max_steps_down * margin_max_step)
-                    )
+                    futures.remove(future)
+                    if len(dags):
+                        futures.add(executor.submit(
+                            self.evaluate_dag_performance_combined_pure_c,
+                            dags.pop(),
+                            adj_matrix,
+                            max_steps_up=int(max_steps_up * margin_max_step),
+                            max_steps_down=int(max_steps_down * margin_max_step))
+                        )
 
         # Combine the two lists
         up_results_np = np.array([item[1] for item in up_results]).astype(float)
@@ -1222,23 +1253,25 @@ class DAGDatasetGenerator:
                     adj_matrix,
                     max_steps=max_steps)
                 for i in range(min(max_workers, len(dags)))}
-            for future in concurrent.futures.as_completed(futures):
-                current_dag, perf = future.result()
-                results.append((current_dag, perf))
+            while futures:
+                for future in concurrent.futures.as_completed(futures):
+                    current_dag, perf = future.result()
+                    results.append((current_dag, perf))
 
-                if max_steps == -1:
-                    max_steps = perf
+                    if max_steps == -1:
+                        max_steps = perf
 
-                if perf < max_steps:
-                    max_steps = perf if (perf / max_steps) > delta_threshold else max_steps * (1 - reduce_ratio)
+                    if perf < max_steps:
+                        max_steps = int(perf if (perf / max_steps) > delta_threshold else max_steps * (1 - reduce_ratio))
 
-                futures.remove(future)
-                if len(dags):
-                    futures.add(executor.submit(
-                        self.evaluate_dag_performance_double_flux_pure_c,
-                        dags.pop(),
-                        max_steps=max_steps * margin_max_step)
-                    )
+                    futures.remove(future)
+                    if len(dags):
+                        futures.add(executor.submit(
+                            self.evaluate_dag_performance_double_flux_pure_c,
+                            dags.pop(),
+                            adj_matrix,
+                            max_steps=int(max_steps * margin_max_step))
+                        )
 
 
         # Find the best DAG based on up and down performance
