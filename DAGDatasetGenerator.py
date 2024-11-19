@@ -36,6 +36,14 @@ best_dag, best_perf, adj_matrix = generator.run_once(9)
 print("best dag is {} perf = {}".format(best_dag.edges, best_perf))
 generator.draw_dag(best_dag, adj_matrix)
 """
+
+def callback_future_end(future):
+    try:
+        future.result()
+    except Exception as e:
+        print(e)
+        raise e
+
 class DAGDatasetGenerator:
     def __init__(self):
         # Enable interactive mode for non-blocking plotting
@@ -136,7 +144,12 @@ class DAGDatasetGenerator:
 
         start_time = time.time()
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self.run_once_with_adaptive_steps_double_flux_pure_c, n, verbose) for i in range(count)}
+            futures = set()
+            for i in range(count):
+                future = executor.submit(self.run_once_with_adaptive_steps_double_flux_pure_c, n, verbose)
+                future.add_done_callback(callback_future_end)
+                futures.add(future)
+
             for future in concurrent.futures.as_completed(futures):
                 best_dag, best_perf, adj_matrix = future.result()
                 link_quality_edges = dict()
@@ -808,7 +821,6 @@ class DAGDatasetGenerator:
         c_dag = (Edge * len(dag))(
             *[Edge(parent, child) for parent, child in dag]
         )
-
         perf = int(lib.evaluate_dag_performance_up_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps))
         return dag, perf
 
@@ -1246,13 +1258,16 @@ class DAGDatasetGenerator:
 
         results = []
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
+            futures = set()
+            for i in range(min(max_workers, len(dags))):
+                future = executor.submit(
                     self.evaluate_dag_performance_double_flux_pure_c,
                     dags.pop(),
                     adj_matrix,
                     max_steps=max_steps)
-                for i in range(min(max_workers, len(dags)))}
+                future.add_done_callback(callback_future_end)
+                futures.add(future)
+
             while futures:
                 for future in concurrent.futures.as_completed(futures):
                     current_dag, perf = future.result()
@@ -1266,13 +1281,19 @@ class DAGDatasetGenerator:
 
                     futures.remove(future)
                     if len(dags):
-                        futures.add(executor.submit(
+                        future = executor.submit(
                             self.evaluate_dag_performance_double_flux_pure_c,
                             dags.pop(),
                             adj_matrix,
                             max_steps=int(max_steps * margin_max_step))
-                        )
-
+                        future.add_done_callback(callback_future_end)
+                        futures.add(future)
+                    # Print state for all futures
+                    if verbose:
+                        print('---------------------------------------------------')
+                        for future in futures:
+                            print(f"ID: {id(future)}, state: {future._state}")
+                        print('---------------------------------------------------')
 
         # Find the best DAG based on up and down performance
         best_dag, best_perf = min(results, key=lambda x: x[1])
