@@ -1,3 +1,5 @@
+from concurrent.futures import ProcessPoolExecutor
+import glob
 import DAGDatasetGenerator
 import networkx as nx
 import numpy as np
@@ -314,6 +316,35 @@ class SimTelemetry:
             return int(avg_steps / epoch_len)
         else:
             return max_steps
+
+    @staticmethod
+    def process_topology(args):
+        topology, simulation_path = args
+        sim = SimTelemetry()
+        sim.load_topology(topology)
+        simulation_path = Path(simulation_path)
+        simulation_path.mkdir(exist_ok=True)
+        output_file = simulation_path / Path(topology.split('/')[-1].replace('.csv', '_simulation.csv'))
+        sim.run_simulation()
+        sim.generate_report(output_file)
+
+    @classmethod
+    def run_parallel_simulations(cls, topology_folder: str = 'dags', output_sim_folder: str = 'simulation'):
+        print("Run simulation with telemetry")
+
+        # Get the list of all topology files
+        topologies = glob.glob(f'{topology_folder}/*.csv')
+
+        print(f"Running simulations for {len(topologies)} topologies in parallel...")
+
+        # Prepare arguments for each topology
+        args = [(topology, output_sim_folder) for topology in topologies]
+
+        # Use ProcessPoolExecutor to parallelize the processing
+        with ProcessPoolExecutor() as executor:
+            executor.map(cls.process_topology, args)
+
+        print("Simulations completed.")
 
 class EnumNodeType(str, Enum):
     BR = 'BR'
