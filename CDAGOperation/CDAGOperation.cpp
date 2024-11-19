@@ -83,20 +83,20 @@ private:
 };
 
 
-static long get_microseconds() {
+static inline long get_microseconds() {
     struct timespec time;
     clock_gettime(CLOCK_MONOTONIC, &time);
     return (time.tv_sec * 1000000L) + (time.tv_nsec / 1000);
 }
 
 // Used in DOWN link simulation. Checks if there is any node which is not filled with the target amount of packets.
-static bool any_packet_missing(int node_count, int packets_per_node, int *packets) {
+static inline bool any_packet_missing(int node_count, int packets_per_node, int *packets) {
     int i = node_count;
     while (packets[--i] >= packets_per_node && i > 0);
     return (bool)i;
 }
 
-static void shuffle(int *array, int n) {
+static inline void shuffle(int *array, int n) {
     for (int i = n - 1; i > 0; i--) {
         int j = rand() % (i + 1);
         // Swap array[i] and array[j]
@@ -106,7 +106,7 @@ static void shuffle(int *array, int n) {
     }
 }
 
-static int get_children(Edge *edges, int edges_count, int parent_node, int *children, int children_count) {
+static inline int get_children(Edge *edges, int edges_count, int parent_node, int *children, int children_count) {
     children_count = 0;
     memset(children, -1, MAX_CHILDREN);
     for (int i = 0; i < edges_count; i++) {
@@ -120,7 +120,7 @@ static int get_children(Edge *edges, int edges_count, int parent_node, int *chil
     return children_count;
 }
 
-static int get_children_transmit_intents(int *children_transmit_intents, int children_transmit_intents_count, int *children, int children_count, bool *transmit_intent) {
+static inline int get_children_transmit_intents(int *children_transmit_intents, int children_transmit_intents_count, int *children, int children_count, bool *transmit_intent) {
     children_transmit_intents_count = 0;
     memset(children_transmit_intents, false, MAX_CHILDREN);
 
@@ -133,7 +133,7 @@ static int get_children_transmit_intents(int *children_transmit_intents, int chi
     return children_transmit_intents_count;
 }
 
-static bool transmission_success(float link_quality) {
+static inline bool transmission_success(float link_quality) {
     if ((float)rand()/(float)RAND_MAX <= link_quality) {
         return true;
     }
@@ -141,7 +141,7 @@ static bool transmission_success(float link_quality) {
     return false;
 }
 
-static int compute_sparsity_metric(const int *array, int size) {
+static inline int compute_sparsity_metric(const int *array, int size) {
     if (size <= 0) {
         return 0; // Handle empty array case
     }
