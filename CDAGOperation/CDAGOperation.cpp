@@ -555,7 +555,7 @@ int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_m
 }
 
 // Non-recursive version using a stack.
-static void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int start_node, std::vector<Edge> *tree_edges) {
+static inline void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int start_node, std::vector<Edge> *tree_edges) {
     std::stack<int> stack;
     stack.push(start_node);
     visited[start_node] = true;
@@ -590,7 +590,7 @@ static void dfs_tree(float **adj_matrix, int nodes_count, bool *visited, int sta
     }
 }*/
 
-uint64_t combinations(int n_edges, int k_nodes) {
+static inline uint64_t combinations(int n_edges, int k_nodes) {
     mpz_t n_fact, k_fact, n_minus_k_fact, denom, result;
     mpz_init(n_fact);
     mpz_init(k_fact);
@@ -628,7 +628,7 @@ uint64_t combinations(int n_edges, int k_nodes) {
     return total_combinations;
 }
 
-static bool all_values_true(bool *array, int array_len) {
+static inline bool all_values_true(bool *array, int array_len) {
     for (int i = 0; i < array_len; i++) {
         if (array[i] == false) {
             return false;
