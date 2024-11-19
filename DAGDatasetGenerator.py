@@ -14,6 +14,7 @@ import datetime
 import concurrent.futures
 import math
 import os
+import gc
 
 import psutil
 import CythonDAGOperation
@@ -1256,7 +1257,8 @@ class DAGDatasetGenerator:
         else:
             max_steps = -1
 
-        results = []
+        idx = 0
+        results = []    # For pre-allocated memory use following and adjust below [([(0, 0)] * len(adj_matrix[0]), 0) for _ in range(len(dags))]
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = set()
             for i in range(min(max_workers, len(dags))):
@@ -1272,6 +1274,10 @@ class DAGDatasetGenerator:
                 for future in concurrent.futures.as_completed(futures):
                     current_dag, perf = future.result()
                     results.append((current_dag, perf))
+                    idx += 1
+
+                    if idx % 10000 == 0:
+                        gc.collect()
 
                     if max_steps == -1:
                         max_steps = perf
@@ -1279,7 +1285,12 @@ class DAGDatasetGenerator:
                     if perf < max_steps:
                         max_steps = int(perf if (perf / max_steps) > delta_threshold else max_steps * (1 - reduce_ratio))
 
+                    current_dag = None
+                    perf = None
+                    del current_dag, perf
+
                     futures.remove(future)
+                    del future
                     if len(dags):
                         future = executor.submit(
                             self.evaluate_dag_performance_double_flux_pure_c,
