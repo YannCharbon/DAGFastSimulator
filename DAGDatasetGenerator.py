@@ -242,7 +242,6 @@ class DAGDatasetGenerator:
             adj_matrix, density_factor = self.generate_random_adj_matrix(n)
             if verbose:
                 print("Density factor = {}".format(density_factor))
-
             # Get all the possible DAGs within this topology
             dags = self.generate_subset_dags_pure_c(adj_matrix)
             if verbose:
@@ -257,7 +256,7 @@ class DAGDatasetGenerator:
 
         return best_dag, best_perf, adj_matrix
 
-    def generate_random_adj_matrix(self, n):
+    def generate_random_adj_matrix(self, n, fixed_density_factor=0.0):
         def check_integrity(a):
             def dfs(v, visited, matrix):
                 visited[v] = True
@@ -290,19 +289,27 @@ class DAGDatasetGenerator:
         # Init matrix
         a = np.zeros((n, n))
 
+        density_factor = 0.0
+
         # Link with best quality = 1.0 No connection = 0.0
         # the ' - 2 * np.random.rand()' controls the density of the interconnections
         rng = np.random.default_rng() # Required in multiprocessing to avoid having same random values in all processes
 
         # A potential valid matrix must have at least enough edges to interconnect each node in the topology
         while np.asarray(a > 0.0).sum() < n - 1:
-            density_factor = rng.random()
+            if fixed_density_factor > 0.0:
+                density_factor = fixed_density_factor
+            else:
+                density_factor = rng.random()
             a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
 
         a = symmetrize(a)
 
         while not check_integrity(a):
-            density_factor = rng.random()
+            if fixed_density_factor > 0.0:
+                density_factor = fixed_density_factor
+            else:
+                density_factor = rng.random()
             a = np.maximum(rng.random((n, n)) * 2 - 1 - 1 * (1 - density_factor), np.zeros((n, n)))
             if np.asarray(a > 0.0).sum() < n - 1:
                 continue
@@ -453,12 +460,13 @@ class DAGDatasetGenerator:
 
         return all_possible_trees
 
-    def generate_subset_dags_pure_c(self, adj_matrix, test_mode=False, no_skip=False):
+    # skip_factor=0 -> automatic determination
+    def generate_subset_dags_pure_c(self, adj_matrix, skip_factor=0, test_mode=False, no_skip=False):
         dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
-        lib.generate_subset_dags.argtypes = (ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_bool, ctypes.c_bool)
+        lib.generate_subset_dags.argtypes = (ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_bool, ctypes.c_bool)
         lib.generate_subset_dags.restype = ctypes.POINTER(ctypes.POINTER(Edge))
 
         lib.free_all_possible_tree.argtypes = (ctypes.POINTER(ctypes.POINTER(Edge)), ctypes.c_int)
@@ -471,7 +479,7 @@ class DAGDatasetGenerator:
         generated_dags_count = 0
         generated_dags_count_c = ctypes.c_int(generated_dags_count)
 
-        all_possible_dags_c = lib.generate_subset_dags(adj_matrix_c, len(adj_matrix[0]), ctypes.pointer(generated_dags_count_c), test_mode, no_skip)
+        all_possible_dags_c = lib.generate_subset_dags(adj_matrix_c, len(adj_matrix[0]), ctypes.pointer(generated_dags_count_c), skip_factor, test_mode, no_skip)
 
         # Convert the C result back to Python list of lists
         all_possible_dags = []

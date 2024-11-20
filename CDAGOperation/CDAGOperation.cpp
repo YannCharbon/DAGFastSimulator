@@ -638,7 +638,7 @@ static inline bool all_values_true(bool *array, int array_len) {
 }
 
 
-Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_dags_count, bool test_mode, bool no_skip) {
+Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_dags_count, int skip_factor, bool test_mode, bool no_skip) {
 #if LOG_TIMINGS > 0
     long start_time = get_microseconds();
 #endif
@@ -685,6 +685,17 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
 #if VERBOSE == 1
     printf("total_combinations %ld n_edges %d k_nodes %d\n", total_combinations, n_edges, k_nodes);
 #endif
+
+    if (skip_factor == 0) {
+        // automatic mode
+        skip_factor = total_combinations / 30000000;    // This reduction factor has been verified statistically to not loose the best DAGs
+        if (skip_factor < 1) {
+            skip_factor = 1;
+        }
+#if VERBOSE == 1
+        printf("Skip factor automatically adjusted to %d\n", skip_factor);
+#endif
+    }
 
 #if LOG_TIMINGS > 0
     long start_of_tree_matrix_generation = get_microseconds();
@@ -754,10 +765,10 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
 
         if (!no_skip){
             // Progress with iterator by a random jump (scale by the number of nodes and number of edges)
-            int64_t total_skip = rand() % (k_nodes * n_edges);
+            int64_t total_skip = (rand() % (k_nodes * n_edges * skip_factor));
             if (test_mode) {
                 // Deterministic behaviour
-                total_skip = (int64_t)((k_nodes * n_edges) / 2);
+                total_skip = (int64_t)((k_nodes * n_edges * skip_factor) / 2);
             }
 #if LOG_TIMINGS == 2
             step_5 = get_microseconds();
