@@ -1,4 +1,13 @@
 env/
 __pycache__
 *.txt
+*.csv
 !requirements.txt
+# Cython build related
+build/
+*.so
+# Related to memray
+*.bin*
+# Valgrind
+*.out
+CDAGOperation/profiling
