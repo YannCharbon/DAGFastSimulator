@@ -1,5 +1,7 @@
 /**
+ * @brief C++ Shared library to accelerate execution of python simulation
  * @author Yann Charbon <yann.charbon@heig-vd.ch>
+ * @note See README for more information
  */
 
 #include "CDAGOperation.h"
@@ -389,7 +391,7 @@ int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matr
 
     This method computes the number of iterations it takes to empty and fill the packet queues of each node within the network.
  */
-int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
+int evaluate_dag_performance_double_flux(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
     int packets_up[MAX_NODES];
     int packets_down[MAX_NODES];
     bool transmit_intent_up[MAX_NODES];

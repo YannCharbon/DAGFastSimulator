@@ -1,3 +1,7 @@
+"""
+Author: Eric Tran <eric.tran@heig-vd.ch>
+Author: Yann Charbon <yann.charbon@heig-vd.ch>
+"""
 from concurrent.futures import ProcessPoolExecutor
 import glob
 import DAGDatasetGenerator

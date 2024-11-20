@@ -1,7 +1,4 @@
-# DAG Fast Simulator
+# DAG Fast Simulator and dataset generator
 
-# Compile Cython module
 
-```bash
-python setup.py build_ext --inplace
-```
+
