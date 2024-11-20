@@ -595,7 +595,7 @@ class DAGDatasetGenerator:
     """
     Plots a DAG
     """
-    def draw_dag(self, G, adj_matrix):
+    def draw_dag(self, G:nx.DiGraph, adj_matrix):
         plt.figure(figsize=(10, 10))
         G.graph["ranksep"] = "1.7"  # Vertical space between ranks
         G.graph["nodesep"] = "0.8"  # Horizontal space between nodes
@@ -603,7 +603,22 @@ class DAGDatasetGenerator:
         nx.draw(G, pos, with_labels=True, node_size=400, node_color="lightblue", font_size=15)
         nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): f"{adj_matrix[u][v]:.2f}" for u, v in G.edges()})
         plt.title("Single DAG")
-        plt.show(block=False)
+        plt.show(block=True)
+
+    """
+    Plots a DAG
+    """
+    def draw_dag(self, dag:list, adj_matrix):
+        G = nx.DiGraph()
+        G.add_edges_from(dag)
+        plt.figure(figsize=(10, 10))
+        G.graph["ranksep"] = "1.7"  # Vertical space between ranks
+        G.graph["nodesep"] = "0.8"  # Horizontal space between nodes
+        pos = graphviz_layout(G, prog="dot")
+        nx.draw(G, pos, with_labels=True, node_size=400, node_color="lightblue", font_size=15)
+        nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): f"{adj_matrix[u][v]:.2f}" for u, v in G.edges()})
+        plt.title("Single DAG")
+        plt.show(block=True)
 
 if __name__ == '__main__':
     print("NOP")
