@@ -41,8 +41,8 @@ class DAGDatasetGenerator:
     to simulate a real-world behaviour but is faster than the combined version. Please use 'run_double_flux'
     if more accuracy is needed (recommended).
     """
-    def run_up_down(self, n, count, keep_best_dags_count=1, max_workers=os.cpu_count(), verbose=False):
-        dags_path = Path('dags')
+    def run_up_down(self, n, count, keep_best_dags_count=1, max_workers=os.cpu_count(), verbose=False, dags_folder_path="dags"):
+        dags_path = Path(dags_folder_path)
         dags_path.mkdir(exist_ok=True)
 
         generated_count = 0
@@ -88,8 +88,8 @@ class DAGDatasetGenerator:
     The simulation is performed in a single pass (combining UP and DOWN traffic). This achieves to simulate
     a simplified real-world mesh network accurately. It is slightly slower than the 'run_up_down'.
     """
-    def run_double_flux(self, n, count, keep_best_dags_count=1, max_workers=os.cpu_count(), verbose=False):
-        dags_path = Path('dags')
+    def run_double_flux(self, n, count, keep_best_dags_count=1, max_workers=os.cpu_count(), verbose=False, dags_folder_path="dags"):
+        dags_path = Path(dags_folder_path)
         dags_path.mkdir(exist_ok=True)
 
         generated_count = 0
