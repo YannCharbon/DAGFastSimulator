@@ -41,7 +41,7 @@ class DAGDatasetGenerator:
     to simulate a real-world behaviour but is faster than the combined version. Please use 'run_double_flux'
     if more accuracy is needed (recommended).
     """
-    def run_up_down(self, n, count, keep_best_dags_count=1, max_workers=os.cpu_count(), verbose=False, dags_folder_path="dags"):
+    def run_up_down(self, n, count, keep_dags_count=1, keep_random_dags=False, max_workers=os.cpu_count(), verbose=False, dags_folder_path="dags"):
         dags_path = Path(dags_folder_path)
         dags_path.mkdir(exist_ok=True)
 
@@ -49,7 +49,7 @@ class DAGDatasetGenerator:
 
         start_time = time.time()
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self.run_once_up_down, n, keep_best_dags_count, verbose) for i in range(count)}
+            futures = {executor.submit(self.run_once_up_down, n, keep_dags_count, keep_random_dags, verbose) for i in range(count)}
             for future in concurrent.futures.as_completed(futures):
                 best_dags, best_perfs, adj_matrix = future.result()
                 # Initialize an empty MultiDiGraph
@@ -88,7 +88,7 @@ class DAGDatasetGenerator:
     The simulation is performed in a single pass (combining UP and DOWN traffic). This achieves to simulate
     a simplified real-world mesh network accurately. It is slightly slower than the 'run_up_down'.
     """
-    def run_double_flux(self, n, count, keep_best_dags_count=1, max_workers=os.cpu_count(), verbose=False, dags_folder_path="dags"):
+    def run_double_flux(self, n, count, keep_dags_count=1, keep_random_dags=False, max_workers=os.cpu_count(), verbose=False, dags_folder_path="dags"):
         dags_path = Path(dags_folder_path)
         dags_path.mkdir(exist_ok=True)
 
@@ -98,7 +98,7 @@ class DAGDatasetGenerator:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = set()
             for i in range(count):
-                future = executor.submit(self.run_once_double_flux, n, keep_best_dags_count, verbose)
+                future = executor.submit(self.run_once_double_flux, n, keep_dags_count, keep_random_dags, verbose)
                 future.add_done_callback(callback_future_end)
                 futures.add(future)
 
@@ -143,26 +143,33 @@ class DAGDatasetGenerator:
     - Compute a subset of all the possible DAGs that can be found in the topology formed by the adjacency matrix
     - Find the best DAG for the subset by running simulation on the whole subset
     """
-    def run_once_up_down(self, n, keep_best_dags_count=1, verbose=False):
+    def run_once_up_down(self, n, keep_dags_count=1, keep_random_dags=False, verbose=False):
         dags = []
         adj_matrix = []
-        while (len(dags) == 0):
-            # Generate a random adjacency matrix
-            adj_matrix, density_factor = self.generate_random_adj_matrix(n)
-            if verbose:
-                print("Density factor = {}".format(density_factor))
+        best_dags = []
+        while len(best_dags) < keep_dags_count:
+            while (len(dags) == 0):
+                # Generate a random adjacency matrix
+                adj_matrix, density_factor = self.generate_random_adj_matrix(n)
+                if verbose:
+                    print("Density factor = {}".format(density_factor))
 
-            # Get all the possible DAGs within this topology
-            dags = self.generate_subset_dags(adj_matrix)
-            if verbose:
-                print(f"Number of DAGs generated: {len(dags)}")
+                # Get all the possible DAGs within this topology
+                if n < 10:
+                    dags = self.generate_subset_dags(adj_matrix, no_skip=True)
+                else:
+                    dags = self.generate_subset_dags(adj_matrix)
+                if verbose:
+                        print(f"Number of DAGs generated: {len(dags)}")
+                        if len(best_dags) < keep_dags_count:
+                            print(f"Warning: Only generated {len(best_dags)} DAG(s), requested {keep_dags_count}. Regenerating")
 
-        # Compute the best performing DAG within the topology
-        best_dags, best_perfs = self.get_best_dag_up_down(dags, adj_matrix, keep_best_dags_count, verbose=verbose)
-        if verbose:
-            print("best dag is {} perf = {}".format(best_dags[0], best_perfs[0]))
-            np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
-            print(adj_matrix)
+            # Compute the best performing DAG within the topology
+            best_dags, best_perfs = self.get_best_dag_up_down(dags, adj_matrix, keep_dags_count, keep_random_dags, verbose=verbose)
+            if verbose:
+                print("best dag is {} perf = {}".format(best_dags[0], best_perfs[0]))
+                np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
+                print(adj_matrix)
 
         return best_dags, best_perfs, adj_matrix
 
@@ -174,25 +181,32 @@ class DAGDatasetGenerator:
     - Compute a subset of all the possible DAGs that can be found in the topology formed by the adjacency matrix
     - Find the best DAG for the subset by running simulation on the whole subset
     """
-    def run_once_double_flux(self, n, keep_best_dags_count=1, verbose=False):
+    def run_once_double_flux(self, n, keep_dags_count=1, keep_random_dags=False, verbose=False):
         dags = []
         adj_matrix = []
-        while (len(dags) == 0):
-            # Generate a random adjacency matrix
-            adj_matrix, density_factor = self.generate_random_adj_matrix(n)
-            if verbose:
-                print("Density factor = {}".format(density_factor))
-            # Get all the possible DAGs within this topology
-            dags = self.generate_subset_dags(adj_matrix)
-            if verbose:
-                print(f"Number of DAGs generated: {len(dags)}")
+        best_dags = []
+        while len(best_dags) < keep_dags_count:
+            while (len(dags) == 0):
+                # Generate a random adjacency matrix
+                adj_matrix, density_factor = self.generate_random_adj_matrix(n)
+                if verbose:
+                    print("Density factor = {}".format(density_factor))
+                # Get all the possible DAGs within this topology
+                if n < 11:
+                    dags = self.generate_subset_dags(adj_matrix, no_skip=True)
+                else:
+                    dags = self.generate_subset_dags(adj_matrix)
+                if verbose:
+                    print(f"Number of DAGs generated: {len(dags)}")
+                    if len(best_dags) < keep_dags_count:
+                        print(f"Warning: Only generated {len(best_dags)} DAG(s), requested {keep_dags_count}. Regenerating")
 
-        # Compute the best performing DAG within the topology
-        best_dags, best_perfs = self.get_best_dag_double_flux(dags, adj_matrix, keep_best_dags_count, verbose=verbose)
-        if verbose:
-            print("best dag is {} perf = {}".format(best_dags[0], best_perfs[0]))
-            np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
-            print(adj_matrix)
+            # Compute the best performing DAG within the topology
+            best_dags, best_perfs = self.get_best_dag_double_flux(dags, adj_matrix, keep_dags_count, keep_random_dags, verbose=verbose)
+            if verbose:
+                print("best dag is {} perf = {}".format(best_dags[0], best_perfs[0]))
+                np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
+                print(adj_matrix)
 
         return best_dags, best_perfs, adj_matrix
 
@@ -380,7 +394,7 @@ class DAGDatasetGenerator:
     """
     Runs the UP/DOWN simulation on each DAG to get the best performing one.
     """
-    def get_best_dag_up_down(self, dags, adj_matrix, keep_best_dags_count=1, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1, verbose=False):
+    def get_best_dag_up_down(self, dags, adj_matrix, keep_dags_count=1, keep_random_dags=False, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1, verbose=False):
         start_time = time.time()
 
         dll_name = "CDAGOperation/libCDAGOperation.so"
@@ -459,9 +473,11 @@ class DAGDatasetGenerator:
         down_results_np = np.array([item[1] for item in down_results]).astype(float)
 
         # normalize and combine
-        up_results_np /= np.max(up_results_np)
-        down_results_np /= np.max(down_results_np)
-        combined_results_np = up_results_np + down_results_np
+        max_up = np.max(up_results_np)
+        max_down = np.max(down_results_np)
+        up_results_np /= max_up
+        down_results_np /= max_down
+        combined_results_np = (up_results_np + down_results_np) * (max_up + max_down) / 2
 
         combined_results = [(up_results[i][0], int(item)) for i, item in enumerate(combined_results_np)]
 
@@ -474,8 +490,17 @@ class DAGDatasetGenerator:
         best_dag_down_overall_score = [list(item[0]) for item in sorted_combined_results].index(list(best_dag_down))
 
         # Find the best DAG based on up and down performance
-        lowests = heapq.nsmallest(keep_best_dags_count, combined_results, key=lambda x: x[1])
-        best_dags, best_perfs = zip(*lowests)
+        best_dags = []
+        best_perfs = []
+        if keep_random_dags == False or (keep_dags_count == 1 and keep_random_dags == True):
+            lowests = heapq.nsmallest(keep_dags_count, combined_results, key=lambda x: x[1])
+            best_dags, best_perfs = zip(*lowests)
+        else:
+            absolute_best_dag, absolute_best_perf = min(combined_results, key=lambda x: x[1])
+            num_choices = min(keep_dags_count - 1, len(combined_results))
+            randoms = random.choices(combined_results, k=num_choices)
+            best_dags = (absolute_best_dag, *(r[0] for r in randoms))
+            best_perfs = (absolute_best_perf, *(r[1] for r in randoms))
 
         end_time = time.time()
         #print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
@@ -487,7 +512,7 @@ class DAGDatasetGenerator:
     """
     Runs the double flux simulation on each DAG to get the best performing one.
     """
-    def get_best_dag_double_flux(self, dags, adj_matrix, keep_best_dags_count=1, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1, verbose=False):
+    def get_best_dag_double_flux(self, dags, adj_matrix, keep_dags_count=1, keep_random_dags=False, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1, verbose=False):
         start_time = time.time()
 
         dll_name = "CDAGOperation/libCDAGOperation.so"
@@ -561,8 +586,17 @@ class DAGDatasetGenerator:
                         futures.add(future)
 
         # Find the best DAG based on up and down performance
-        lowests = heapq.nsmallest(keep_best_dags_count, results, key=lambda x: x[1])
-        best_dags, best_perfs = zip(*lowests)
+        best_dags = []
+        best_perfs = []
+        if keep_random_dags == False or (keep_dags_count == 1 and keep_random_dags == True):
+            lowests = heapq.nsmallest(keep_dags_count, results, key=lambda x: x[1])
+            best_dags, best_perfs = zip(*lowests)
+        else:
+            absolute_best_dag, absolute_best_perf = min(results, key=lambda x: x[1])
+            num_choices = min(keep_dags_count - 1, len(results))
+            randoms = random.choices(results, k=num_choices)
+            best_dags = (absolute_best_dag, *(r[0] for r in randoms))
+            best_perfs = (absolute_best_perf, *(r[1] for r in randoms))
 
         end_time = time.time()
         #print("\nComputing best DAG in parallel took {:.2f} seconds".format(end_time - start_time))
