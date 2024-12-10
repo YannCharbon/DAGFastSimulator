@@ -13,5 +13,5 @@ if __name__ == '__main__':
     generator = DAGDatasetGenerator()
     telemetry = SimTelemetry()
 
-    generator.run_double_flux(20, 100, int(os.cpu_count()), verbose=False)
+    generator.run_double_flux(20, 100, keep_dags_count=1, keep_random_dags=False, max_workers=int(os.cpu_count()), verbose=False, dags_folder_path="dags")
     telemetry.run_parallel_simulations("dags", "simulation")
