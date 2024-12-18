@@ -27,7 +27,7 @@ class SimTelemetry:
 
         number_of_dags = len(dag_types)
 
-        self.dags = [nx.DiGraph()] * number_of_dags
+        self.dags = [nx.DiGraph() for _ in range(number_of_dags)]
 
         self.tpg = nx.DiGraph()
         self.tpg.add_nodes_from(data.nodes)
@@ -37,7 +37,8 @@ class SimTelemetry:
             if k == 0:
                 self.tpg.add_edge(u, v, link_quality=link_quality)
             else:
-                self.dags[k-1].add_edge(u, v, link_quality=link_quality)
+                dag_idx = int(labels.get('edge_type').split('_')[1])
+                self.dags[dag_idx].add_edge(u, v, link_quality=link_quality)
 
         self.dags_nodes_telemetry = []
         for i in range(0, number_of_dags):
