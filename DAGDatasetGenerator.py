@@ -180,8 +180,10 @@ class DAGDatasetGenerator:
     - Generate a random adjacency matrix of size 'n x n'
     - Compute a subset of all the possible DAGs that can be found in the topology formed by the adjacency matrix
     - Find the best DAG for the subset by running simulation on the whole subset
+
+    Note: max_steps can be provided to impose the maximum number of steps to be adaptative during the get_best_dag_double_flux computation (can be useful to keep an accurate precision on best_perfs content)
     """
-    def run_once_double_flux(self, n, keep_dags_count=1, keep_random_dags=False, verbose=False):
+    def run_once_double_flux(self, n, keep_dags_count=1, keep_random_dags=False, max_steps=-1, verbose=False):
         dags = []
         adj_matrix = []
         best_dags = []
@@ -202,7 +204,7 @@ class DAGDatasetGenerator:
                         print(f"Warning: Only generated {len(best_dags)} DAG(s), requested {keep_dags_count}. Regenerating")
 
             # Compute the best performing DAG within the topology
-            best_dags, best_perfs = self.get_best_dag_double_flux(dags, adj_matrix, keep_dags_count, keep_random_dags, verbose=verbose)
+            best_dags, best_perfs = self.get_best_dag_double_flux(dags, adj_matrix, keep_dags_count, keep_random_dags, max_steps=max_steps, verbose=verbose)
             if verbose:
                 print("best dag is {} perf = {}".format(best_dags[0], best_perfs[0]))
                 np.set_printoptions(formatter={'all': lambda x: "{:.4g},".format(x)})
@@ -512,7 +514,7 @@ class DAGDatasetGenerator:
     """
     Runs the double flux simulation on each DAG to get the best performing one.
     """
-    def get_best_dag_double_flux(self, dags, adj_matrix, keep_dags_count=1, keep_random_dags=False, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1, verbose=False):
+    def get_best_dag_double_flux(self, dags, adj_matrix, keep_dags_count=1, keep_random_dags=False, max_workers=os.cpu_count(), delta_threshold=0.8, reduce_ratio = 0.2, margin_max_step = 1.1, max_steps=-1, verbose=False):
         start_time = time.time()
 
         dll_name = "CDAGOperation/libCDAGOperation.so"
@@ -528,19 +530,21 @@ class DAGDatasetGenerator:
         )
 
         # Pre-compute step threshold. This way we don't compute performance for bad DAGs because it is not relevant and waists execution time.
-        max_steps = 1e9  # very high value just for initialization
-        if len(dags) > 800:
-            iter = 50 if len(dags) >= 50 else len(dags)
-            for _ in range(0, iter):
-                dag = random.choice(dags)
-                c_dag = (Edge * len(dag))(
-                    *[Edge(parent, child) for parent, child in dag]
-                )
-                max_steps = int(min(lib.evaluate_dag_performance_double_flux(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, -1), max_steps))
-            if verbose:
-                print("Max steps = " + str(max_steps))
-        else:
-            max_steps = -1
+        adaptative_max_steps = False
+        if max_steps == -1:
+            adaptative_max_steps = True
+            if len(dags) > 800:
+                iter = 50 if len(dags) >= 50 else len(dags)
+                for _ in range(0, iter):
+                    dag = random.choice(dags)
+                    c_dag = (Edge * len(dag))(
+                        *[Edge(parent, child) for parent, child in dag]
+                    )
+                    max_steps = int(min(lib.evaluate_dag_performance_double_flux(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, -1), max_steps))
+                if verbose:
+                    print("Max steps = " + str(max_steps))
+            else:
+                max_steps = -1
 
         idx = 0
         results = []    # For pre-allocated memory use following and adjust below [([(0, 0)] * len(adj_matrix[0]), 0) for _ in range(len(dags))]
@@ -564,11 +568,12 @@ class DAGDatasetGenerator:
                     if idx % 10000 == 0:
                         gc.collect()
 
-                    if max_steps == -1:
-                        max_steps = perf
+                    if adaptative_max_steps:
+                        if max_steps == -1:
+                            max_steps = perf
 
-                    if perf < max_steps:
-                        max_steps = int(perf if (perf / max_steps) > delta_threshold else max_steps * (1 - reduce_ratio))
+                        if perf < max_steps:
+                            max_steps = int(perf if (perf / max_steps) > delta_threshold else max_steps * (1 - reduce_ratio))
 
                     current_dag = None
                     perf = None
@@ -577,11 +582,18 @@ class DAGDatasetGenerator:
                     futures.remove(future)
                     del future
                     if len(dags):
-                        future = executor.submit(
-                            self.evaluate_dag_performance_double_flux,
-                            dags.pop(),
-                            adj_matrix,
-                            max_steps=int(max_steps * margin_max_step))
+                        if adaptative_max_steps == True:
+                            future = executor.submit(
+                                self.evaluate_dag_performance_double_flux,
+                                dags.pop(),
+                                adj_matrix,
+                                max_steps=int(max_steps * margin_max_step))
+                        else:
+                            future = executor.submit(
+                                self.evaluate_dag_performance_double_flux,
+                                dags.pop(),
+                                adj_matrix,
+                                max_steps=max_steps)
                         future.add_done_callback(callback_future_end)
                         futures.add(future)
 
