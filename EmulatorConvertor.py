@@ -1,3 +1,9 @@
+"""
+Author: Eric Tran <eric.tran@heig-vd.ch>
+
+Format converter to generate simulation file that can be used with https://github.com/mahboobkarimian/wisun-mbed-simulator
+"""
+
 import pandas as pd
 from jinja2 import FileSystemLoader, Environment
 import argparse

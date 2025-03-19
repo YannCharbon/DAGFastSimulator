@@ -1,5 +1,7 @@
 /**
+ * @brief C++ Shared library to accelerate execution of python simulation
  * @author Yann Charbon <yann.charbon@heig-vd.ch>
+ * @note See README for more information
  */
 
 #include "CDAGOperation.h"
@@ -36,10 +38,11 @@ using namespace std;
 class CombinationIterator {
 public:
     CombinationIterator(const std::vector<Edge>& edges, int k)
-        : edges(edges), k(k), indices(k), combination(k) {  // pre-allocate `combination`
-        for (int i = 0; i < k; ++i) {
+        : edges(edges), k(k), indices(k), combination(k) {
+        for (int i = 0; i < k; i++) {
             indices[i] = i;
         }
+        totalCombinations = calculateCombination(edges.size(), k);
     }
 
     bool hasNext() const {
@@ -47,40 +50,82 @@ public:
     }
 
     const std::vector<Edge>& next() {
-        for (int i = 0; i < k; ++i) {
+        for (int i = 0; i < k; i++) {
             combination[i] = edges[indices[i]];
         }
         advance();
-        return std::move(combination);  // Optimization by compiler
+        return combination;  // Return by reference to avoid copying.
     }
 
-    void skipCombinations(int skip_count) {
-        for (int i = 0; i < skip_count && hasNext(); ++i) {
-            advance();
+    void skipCombinations(long long skip_count) {
+        if (skip_count <= 0 || finished) return;
+
+        long long target = currentIndex + skip_count;
+
+        // If skipping beyond the last combination, finish iteration.
+        if (target >= totalCombinations) {
+            finished = true;
+            return;
         }
+
+        // Calculate the new indices for the target rank.
+        computeIndices(target);
+        currentIndex = target;
     }
 
 private:
     const std::vector<Edge>& edges;
     int k;
-    std::vector<int> indices;
-    std::vector<Edge> combination;  // reuse this for each combination
+    std::vector<int> indices;  // Current combination indices.
+    std::vector<Edge> combination;  // Reused for the current combination.
     bool finished = false;
+    long long totalCombinations = 0;  // Total number of combinations.
+    long long currentIndex = 0;  // Current combination rank.
 
     void advance() {
+        if (finished) return;
+
+        computeIndices(currentIndex + 1);
+        currentIndex++;
+
+        if (currentIndex >= totalCombinations) {
+            finished = true;
+        }
+    }
+
+    long long calculateCombination(int n, int r) const {
+        if (r > n) return 0;
+        long long result = 1;
+        for (int i = 1; i <= r; i++) {
+            result = result * (n - i + 1) / i;
+        }
+        return result;
+    }
+
+    void computeIndices(long long rank) {
         int n = edges.size();
-        for (int i = k - 1; i >= 0; --i) {
-            if (indices[i] != i + n - k) {
-                ++indices[i];
-                for (int j = i + 1; j < k; ++j) {
-                    indices[j] = indices[j - 1] + 1;
+        int remaining = k;
+        int current = 0;
+
+        for (int i = 0; i < k; i++) {
+            while (remaining > 0) {
+                // Combinations remaining if we pick `current` for this position.
+                long long combinations = calculateCombination(n - current - 1, remaining - 1);
+
+                if (rank < combinations) {
+                    indices[i] = current;
+                    remaining--;
+                    current++;
+                    break;
+                } else {
+                    rank -= combinations;
+                    current++;
                 }
-                return;
             }
         }
-        finished = true;
     }
 };
+
 
 
 static inline long get_microseconds() {
@@ -389,7 +434,7 @@ int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matr
 
     This method computes the number of iterations it takes to empty and fill the packet queues of each node within the network.
  */
-int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
+int evaluate_dag_performance_double_flux(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
     int packets_up[MAX_NODES];
     int packets_down[MAX_NODES];
     bool transmit_intent_up[MAX_NODES];
@@ -673,7 +718,7 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
     int k_nodes = nodes_count - 1;
 
     if (n_edges < k_nodes) {
-#if VERBOSE == 1
+#if VERBOSE >= 1
         printf("Error: Not enough edges to connect every node. Skipping.\n");
 #endif
         return NULL;
@@ -686,7 +731,7 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
     printf("C - Took %ld [us] to init and compute combinations\n", end_of_combination_computation - start_time);
 
 #endif
-#if VERBOSE == 1
+#if VERBOSE >= 1
     printf("total_combinations %ld n_edges %d k_nodes %d\n", total_combinations, n_edges, k_nodes);
 #endif
 
@@ -696,7 +741,7 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
         if (skip_factor < 1) {
             skip_factor = 1;
         }
-#if VERBOSE == 1
+#if VERBOSE >= 1
         printf("Skip factor automatically adjusted to %d\n", skip_factor);
 #endif
     }
@@ -727,6 +772,9 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
     vector<Edge> tree_edges;
     tree_edges.reserve(nodes_count - 1);  // Reserve memory once
 
+#if VERBOSE >= 2
+    long long unsigned treated = 0, last_treated_step = 0;
+#endif
     while (comb_iter.hasNext()) {
 #if LOG_TIMINGS == 2
         step_0 = get_microseconds();
@@ -734,6 +782,13 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
         std::vector<Edge> edges = comb_iter.next();
 #if LOG_TIMINGS == 2
         step_1 = get_microseconds();
+#endif
+
+#if VERBOSE >= 2
+        if (treated > last_treated_step + skip_factor * 10000) {
+            last_treated_step = treated;
+            printf("%llu (%llu%%)\r", treated, treated * 100 / total_combinations);
+        }
 #endif
 
         // Equivalent of Python tree_matrix = np.zeros_like(adj_matrix)
@@ -774,6 +829,9 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
                 // Deterministic behaviour
                 total_skip = (int64_t)((k_nodes * n_edges * skip_factor) / 2);
             }
+#if VERBOSE >= 2
+            treated += total_skip;
+#endif
 #if LOG_TIMINGS == 2
             step_5 = get_microseconds();
 #endif
@@ -782,6 +840,11 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
                 break;
             }
         }
+#if VERBOSE >= 2
+        else {
+            treated++;
+        }
+#endif
 
         tree_edges.clear();
 
@@ -790,6 +853,10 @@ Edge** generate_subset_dags(float **adj_matrix, int nodes_count, int *generated_
         printf("Step 1 %ld [us], Step 2 %ld [us], Step 3 %ld [us], Step 4 %ld [us], Step 5 %ld [us], Step 6 %ld [us]\n", step_1 - step_0, step_2 - step_1, step_3 - step_2, step_4 - step_3, step_5 - step_4, step_6 - step_5);
 #endif
     }
+
+#if VERBOSE >= 2
+    printf("\n100%%\n");
+#endif
 
 #if LOG_TIMINGS > 0
     long end_of_tree_computation = get_microseconds();
