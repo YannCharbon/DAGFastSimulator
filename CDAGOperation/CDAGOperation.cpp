@@ -172,7 +172,7 @@ static inline int compute_sparsity_metric(const int *array, int size) {
 int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
     int packets[MAX_NODES];
     bool transmit_intent[MAX_NODES];
-    bool transmitting[MAX_NODES];
+    bool busy[MAX_NODES];
 
     int random_indexes[MAX_NODES];
 
@@ -208,7 +208,7 @@ int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix
         for (int i = 0; i < nodes_count; i++) {
             packets[i] = packets_per_node;
         }
-        memset(transmitting, false, nodes_count);
+        memset(busy, false, nodes_count);
         memset(transmit_intent, true, nodes_count);
         total_packets = (nodes_count - 1) * packets_per_node;
 
@@ -229,7 +229,7 @@ int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix
             shuffle(random_indexes, nodes_count);
             for (int i = 0; i < nodes_count; i++) {
                 int parent = random_indexes[i];
-                if (transmitting[parent]) {
+                if (busy[parent]) {
                     continue;
                 }
 
@@ -238,7 +238,7 @@ int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix
                     children_transmit_intents_count = get_children_transmit_intents(children_transmit_intents, children_transmit_intents_count, children, children_count, transmit_intent);
                     if (children_transmit_intents_count > 0) {
                         int transmitting_child = children_transmit_intents[rand() % children_transmit_intents_count];
-                        if (transmitting[transmitting_child] == false) {
+                        if (busy[transmitting_child] == false) {
                             float link_quality = adj_matrix[parent][transmitting_child];
 
                             if (transmission_success(link_quality)) {
@@ -248,17 +248,17 @@ int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix
                                     total_packets--;
                                 }
                                 transmit_intent[transmitting_child] = false;
-                                transmitting[parent] = true;    // Parent is not actually transmitting, but it is busy while receiving from child
+                                busy[parent] = true;    // Parent is not actually transmitting, but it is busy while receiving from child
                             }
 
-                            transmitting[transmitting_child] = true;
+                            busy[transmitting_child] = true;
                         }
                     }
                 }
             }
 
             // Reset the transmitting and receiving status for the next step
-            memset(transmitting, false, nodes_count);
+            memset(busy, false, nodes_count);
 
             // Root node never holds an packet
             packets[0] = 0;
@@ -290,7 +290,7 @@ int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix
  */
 int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
     int packets[MAX_NODES];
-    bool transmitting[MAX_NODES];
+    bool busy[MAX_NODES];
 
     int random_indexes[MAX_NODES];
 
@@ -322,14 +322,14 @@ int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matr
         for (int i = 0; i < nodes_count; i++) {
             packets[i] = 0;
         }
-        memset(transmitting, false, nodes_count);
+        memset(busy, false, nodes_count);
 
         int steps = 0;
         while (any_packet_missing(nodes_count, packets_per_node, packets)) {
             steps++;
 
             // Root node inserts a packet into the network if it's not transmitting
-            if (packets[0] < packets_per_node && !transmitting[0]) {
+            if (packets[0] < packets_per_node && !busy[0]) {
                 packets[0]++;
             }
 
@@ -338,29 +338,29 @@ int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matr
                 int parent = random_indexes[i];
 
                 // Node has packets to send and is not already transmitting
-                if (packets[parent] > 0 && !transmitting[parent]) {
+                if (packets[parent] > 0 && !busy[parent]) {
                     children_count = get_children(edges, edges_count, parent, children, children_count);
                     if (children_count > 0) {
                         // Choose a child randomly to try to send the packet to
                         int child = children[rand() % children_count];
 
                         // Check if the child is not currently transmitting
-                        if (!transmitting[child]) {
+                        if (!busy[child]) {
                             float link_quality = adj_matrix[parent][child];
 
                             if (transmission_success(link_quality) && packets[child] < packets_per_node) {
                                 packets[child]++;
                                 packets[parent]--;
-                                transmitting[child] = true; // Mark the child as busy (not actually transmitting but receiving from parent).
+                                busy[child] = true; // Mark the child as busy (not actually transmitting but receiving from parent).
                             }
 
-                            transmitting[parent] = true; // Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
+                            busy[parent] = true; // Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
                         }
                     }
                 }
             }
 
-            memset(transmitting, false, nodes_count);
+            memset(busy, false, nodes_count);
             packets[0] = 0;
 
             if (max_steps != -1 && steps > max_steps) {
@@ -393,7 +393,7 @@ int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_m
     int packets_up[MAX_NODES];
     int packets_down[MAX_NODES];
     bool transmit_intent_up[MAX_NODES];
-    bool transmitting[MAX_NODES];
+    bool busy[MAX_NODES];
 
     int random_indexes[MAX_NODES];
 
@@ -430,7 +430,7 @@ int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_m
             packets_up[i] = packets_per_node;
             packets_down[i] = 0;
         }
-        memset(transmitting, false, nodes_count);
+        memset(busy, false, nodes_count);
         memset(transmit_intent_up, true, nodes_count);
         total_packets_up = (nodes_count - 1) * packets_per_node;
 
@@ -474,7 +474,7 @@ int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_m
                 }
 
                 if (up_not_down) {
-                    if (transmitting[parent]) {
+                    if (busy[parent]) {
                         continue;
                     }
 
@@ -483,42 +483,46 @@ int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_m
                         children_transmit_intents_count = get_children_transmit_intents(children_transmit_intents, children_transmit_intents_count, children, children_count, transmit_intent_up);
                         if (children_transmit_intents_count > 0) {
                             int transmitting_child = children_transmit_intents[rand() % children_transmit_intents_count];
-                            if (transmitting[transmitting_child] == false) {
+                            if (busy[transmitting_child] == false) {
                                 float link_quality = adj_matrix[parent][transmitting_child];
 
                                 if (transmission_success(link_quality)) {
-                                    packets_up[parent]++;
-                                    packets_up[transmitting_child]--;
-                                    if (parent == 0) {
-                                        total_packets_up--;
+                                    if (packets_up[parent] < packets_per_node) {    // simulate full queue
+                                        packets_up[parent]++;
+                                        packets_up[transmitting_child]--;
+                                        if (parent == 0) {
+                                            total_packets_up--;
+                                        }
                                     }
                                     transmit_intent_up[transmitting_child] = false;
-                                    transmitting[parent] = true;    // Parent is not actually transmitting, but it is busy while receiving from child
+                                    busy[parent] = true;    // Parent is not actually transmitting, but it is busy while receiving from child
                                 }
 
-                                transmitting[transmitting_child] = true;
+                                busy[transmitting_child] = true;
                             }
                         }
                     }
                 } else {    // DOWN
                     // Node has packets to send and is not already transmitting
-                    if (packets_down[parent] > 0 && !transmitting[parent]) {
+                    if (packets_down[parent] > 0 && !busy[parent]) {
                         children_count = get_children(edges, edges_count, parent, children, children_count);
                         if (children_count > 0) {
                             // Choose a child randomly to try to send the packet to
                             int child = children[rand() % children_count];
 
                             // Check if the child is not currently transmitting
-                            if (!transmitting[child]) {
+                            if (!busy[child]) {
                                 float link_quality = adj_matrix[parent][child];
 
-                                if (transmission_success(link_quality) && packets_down[child] < packets_per_node) {
-                                    packets_down[child]++;
-                                    packets_down[parent]--;
-                                    transmitting[child] = true; // Mark the child as busy (not actually transmitting but receiving from parent).
+                                if (transmission_success(link_quality)) {
+                                    if (packets_down[child] < packets_per_node) {   // simulate full queue
+                                        packets_down[child]++;
+                                        packets_down[parent]--;
+                                    }
+                                    busy[child] = true; // Mark the child as busy (not actually transmitting but receiving from parent).
                                 }
 
-                                transmitting[parent] = true; // Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
+                                busy[parent] = true; // Mark the parent as busy. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
                             }
                         }
                     }
@@ -526,7 +530,7 @@ int evaluate_dag_performance_up_down(Edge *edges, int edges_count, float **adj_m
             }
 
             // Reset the transmitting and receiving status for the next step
-            memset(transmitting, false, nodes_count);
+            memset(busy, false, nodes_count);
 
             // Root node never holds an packet
             packets_up[0] = 0;

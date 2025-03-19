@@ -533,7 +533,7 @@ class DAGDatasetGenerator:
 
         packets = {node: packets_per_node for node in G.nodes}
         transmit_intent = {node: True for node in G.nodes}  # Transmission intentions
-        transmitting = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
+        busy = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
 
         avg_steps = 0
         early_stop = False
@@ -542,7 +542,7 @@ class DAGDatasetGenerator:
                 for i in range(0, len(packets)):
                     # This is done to optimize execution time
                     packets[i] = packets_per_node
-                    transmitting[i] = False
+                    busy[i] = False
                     transmit_intent[i] = True
 
             steps = 0
@@ -556,7 +556,7 @@ class DAGDatasetGenerator:
                 np.random.shuffle(r)
                 for i in r:
                     parent = list(G.nodes)[i]
-                    if transmitting[parent] == True:
+                    if busy[parent] == True:
                         continue
                     children = list(G.successors(parent))
                     transmitting_child = -1
@@ -574,11 +574,11 @@ class DAGDatasetGenerator:
                             packets[transmitting_child] -= 1
                             transmit_intent[transmitting_child] = False
 
-                        transmitting[transmitting_child] = True
+                        busy[transmitting_child] = True
 
 
                 # Reset the transmitting and receiving status for the next step
-                transmitting = {node: False for node in G.nodes}
+                busy = {node: False for node in G.nodes}
                 # Root node never holds an packet
                 packets[0] = 0
 
@@ -615,7 +615,7 @@ class DAGDatasetGenerator:
         n = len(G.nodes)
 
         packets = {node: 0 for node in G.nodes}
-        transmitting = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
+        busy = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
 
         avg_steps = 0
         early_stop = False
@@ -624,14 +624,14 @@ class DAGDatasetGenerator:
                 for i in range(0, len(packets)):
                     # This is done to optimize execution time
                     packets[i] = 0
-                    transmitting[i] = False
+                    busy[i] = False
 
             steps = 0
             while any(packets[node] < packets_per_node for node in G.nodes):
                 steps += 1
 
                 # Root node inserts a packet into the network if it's not transmitting
-                if packets[0] < packets_per_node and not transmitting[0]:
+                if packets[0] < packets_per_node and not busy[0]:
                     packets[0] += 1
 
                 # Process packet transmission for all nodes
@@ -639,13 +639,13 @@ class DAGDatasetGenerator:
                 np.random.shuffle(r)
                 for i in r:
                     node = list(G.nodes)[i]
-                    if packets[node] > 0 and not transmitting[node]:  # Node has packets to send and is not already transmitting
+                    if packets[node] > 0 and not busy[node]:  # Node has packets to send and is not already transmitting
                         children = list(G.successors(node))
                         if children:
                             # Choose a child randomly to try to send the packet to
                             child = random.choice(children)
 
-                            if not transmitting[child]:  # Check if the child is not currently transmitting
+                            if not busy[child]:  # Check if the child is not currently transmitting
                                 # Determine if transmission is successful based on Link Quality
                                 link_quality = adj_matrix[node][child]  # Get Link Quality value for the link
                                 transmission_success = random.random() <= link_quality
@@ -653,10 +653,10 @@ class DAGDatasetGenerator:
                                 if transmission_success and packets[child] < packets_per_node:
                                     packets[child] += 1
                                     packets[node] -= 1
-                                    transmitting[child] = True  # Mark the child as transmitting. It is also the case when transmission success is false because it simulates a collision
+                                    busy[child] = True  # Mark the child as transmitting. It is also the case when transmission success is false because it simulates a collision
 
                 # Reset the transmitting status for the next step
-                transmitting = {node: False for node in G.nodes}
+                busy = {node: False for node in G.nodes}
 
                 if max_steps != -1 and steps > max_steps:
                     early_stop = True
@@ -681,7 +681,7 @@ class DAGDatasetGenerator:
         packets_up = {node: packets_per_node for node in G.nodes}
         packets_down = {node: 0 for node in G.nodes}
         transmit_intent_up = {node: True for node in G.nodes}  # Transmission intentions
-        transmitting = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
+        busy = {node: False for node in G.nodes}  # Track which nodes are currently transmitting
 
         avg_steps = 0
         early_stop = False
@@ -691,7 +691,7 @@ class DAGDatasetGenerator:
                     # This is done to optimize execution time
                     packets_up[i] = packets_per_node
                     packets_down[i] = 0
-                    transmitting[i] = False
+                    busy[i] = False
                     transmit_intent_up[i] = True
 
             steps = 0
@@ -722,7 +722,7 @@ class DAGDatasetGenerator:
 
                     if up_not_down == True: # UP
                         parent = list(G.nodes)[i]
-                        if transmitting[parent] == True:
+                        if busy[parent] == True:
                             continue
                         children = list(G.successors(parent))
                         transmitting_child = -1
@@ -736,34 +736,36 @@ class DAGDatasetGenerator:
                             transmission_success = random.random() <= link_quality
 
                             if transmission_success:
-                                packets_up[parent] += 1
-                                packets_up[transmitting_child] -= 1
+                                if packets_up[parent] < packets_per_node:  # simulate full queue
+                                    packets_up[parent] += 1
+                                    packets_up[transmitting_child] -= 1
                                 transmit_intent_up[transmitting_child] = False
 
-                            transmitting[transmitting_child] = True
+                            busy[transmitting_child] = True
                     else:   # DOWN
                         node = list(G.nodes)[i]
-                        if packets_down[node] > 0 and not transmitting[node]:  # Node has packets to send and is not already transmitting
+                        if packets_down[node] > 0 and not busy[node]:  # Node has packets to send and is not already transmitting
                             children = list(G.successors(node))
                             if children:
                                 # Choose a child randomly to try to send the packet to
                                 child = random.choice(children)
 
-                                if not transmitting[child]:  # Check if the child is not currently transmitting
+                                if not busy[child]:  # Check if the child is not currently transmitting
                                     # Determine if transmission is successful based on Link Quality
                                     link_quality = adj_matrix[node][child]  # Get Link Quality value for the link
                                     transmission_success = random.random() <= link_quality
 
-                                    if transmission_success and packets_down[child] < packets_per_node:
-                                        packets_down[child] += 1
-                                        packets_down[node] -= 1
-                                        transmitting[child] = True  # Mark the child as transmitting. It is also the case when transmission success is false because it simulates a collision
+                                    if transmission_success:
+                                        if packets_down[child] < packets_per_node:  # simulate full queue
+                                            packets_down[child] += 1
+                                            packets_down[node] -= 1
+                                        busy[child] = True  # Mark the child as transmitting. It is also the case when transmission success is false because it simulates a collision
 
-                                    transmitting[parent] = True # Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
+                                    busy[parent] = True # Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
 
 
                 # Reset the transmitting and receiving status for the next step
-                transmitting = {node: False for node in G.nodes}
+                busy = {node: False for node in G.nodes}
                 # Root node never holds an packet
                 packets_up[0] = 0
 

@@ -2,7 +2,7 @@
 
 ```bash
 sudo apt install libgmp-dev
-g++ -DMAX_NODES=20 -DMAX_CHILDREN=5 -DLOG_TIMINGS=0 -DVERBOSE=0 -shared -o libCDAGOperation.so -fPIC -Ofast -flto CDAGOperation.cpp  -lgmp
+g++ -DMAX_NODES=33 -DMAX_CHILDREN=5 -DLOG_TIMINGS=0 -DVERBOSE=0 -shared -o libCDAGOperation.so -fPIC -Ofast -flto CDAGOperation.cpp  -lgmp
 ```
 
 # Installing and using C/C++ memory profiling tools
