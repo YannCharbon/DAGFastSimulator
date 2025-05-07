@@ -338,9 +338,12 @@ class DAGDatasetGenerator:
     The results are averaged over 'epoch_len' runs. The initial (UP) or target (down) packet count can be specified using 'packets_per_node'.
     'max_steps_up' and 'max_steps_down' can be used to early-stop the simulation in case of timeout or a quality threshold (e.g. stopping because the current DAG performs worse than others).
 
+    It is possible to monitor the bottlenecks by passing an int array (bottleneck_factors). When any node tries to send to a target node which is busy, the bottleneck factor of the target node
+    is incremented. The higher the bottleneck factor is, the busier a node is.
+
     Returns the UP and DOWN performance (i.e. the number of simulation steps to empty/fill the network). A lower value <=> better performance.
     """
-    def evaluate_dag_performance_up_down(self, dag, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1):
+    def evaluate_dag_performance_up_down(self, dag, adj_matrix, epoch_len=1, packets_per_node=15, max_steps_up=-1, max_steps_down=-1, bottleneck_factors=None):
         dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
@@ -360,8 +363,18 @@ class DAGDatasetGenerator:
             *[Edge(parent, child) for parent, child in dag]
         )
 
-        perf_up = int(lib.evaluate_dag_performance_up(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_up))
-        perf_down = int(lib.evaluate_dag_performance_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_down))
+        if bottleneck_factors:
+            bottleneck_factors_c = (ctypes.c_int * len(bottleneck_factors))(*bottleneck_factors)
+        else:
+            bottleneck_factors_c = None  # NULL
+
+        perf_up = int(lib.evaluate_dag_performance_up(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_up, bottleneck_factors_c))
+        perf_down = int(lib.evaluate_dag_performance_down(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps_down, bottleneck_factors_c))
+
+        if bottleneck_factors:
+            for i in range(len(bottleneck_factors)):
+                bottleneck_factors[i] = bottleneck_factors_c[i]
+
         return dag, perf_up, perf_down
 
     """
@@ -371,14 +384,17 @@ class DAGDatasetGenerator:
     The results are averaged over 'epoch_len' runs. The initial (UP) or target (down) packet count can be specified using 'packets_per_node'.
     'max_steps_up' and 'max_steps_down' can be used to early-stop the simulation in case of timeout or a quality threshold (e.g. stopping because the current DAG performs worse than others).
 
+    It is possible to monitor the bottlenecks by passing an int array (bottleneck_factors). When any node tries to send to a target node which is busy, the bottleneck factor of the target node
+    is incremented. The higher the bottleneck factor is, the busier a node is.
+
     Returns the performance (i.e. the number of simulation steps to empty/fill the network). A lower value <=> better performance.
     """
-    def evaluate_dag_performance_double_flux(self, dag, adj_matrix, epoch_len=1, packets_per_node=15, max_steps=-1):
+    def evaluate_dag_performance_double_flux(self, dag, adj_matrix, epoch_len=1, packets_per_node=15, max_steps=-1, bottleneck_factors=None):
         dll_name = "CDAGOperation/libCDAGOperation.so"
         dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
         lib = ctypes.CDLL(dllabspath)
 
-        lib.evaluate_dag_performance_double_flux.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+        lib.evaluate_dag_performance_double_flux.argtypes = (ctypes.POINTER(Edge), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int))
         lib.evaluate_dag_performance_double_flux.restype = ctypes.c_int
 
         CMatrixType = ctypes.POINTER(ctypes.c_float) * len(adj_matrix)
@@ -389,7 +405,18 @@ class DAGDatasetGenerator:
         c_dag = (Edge * len(dag))(
             *[Edge(parent, child) for parent, child in dag]
         )
-        perf = int(lib.evaluate_dag_performance_double_flux(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps))
+
+        if bottleneck_factors:
+            bottleneck_factors_c = (ctypes.c_int * len(bottleneck_factors))(*bottleneck_factors)
+        else:
+            bottleneck_factors_c = None  # NULL
+
+        perf = int(lib.evaluate_dag_performance_double_flux(c_dag, len(dag), adj_matrix_c, len(adj_matrix[0]), 2, 15, max_steps, bottleneck_factors_c))
+
+        if bottleneck_factors:
+            for i in range(len(bottleneck_factors)):
+                bottleneck_factors[i] = bottleneck_factors_c[i]
+
         return dag, perf
 
 

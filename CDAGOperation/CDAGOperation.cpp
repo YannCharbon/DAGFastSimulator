@@ -213,8 +213,10 @@ static inline int compute_sparsity_metric(const int *array, int size) {
     Uplink global bandwidth measurement.
 
     This method computes the number of iterations it takes to empty the packet queue of each node within the network.
+
+    @note The bottleneck_factors are not reset internally, the provided array should be manually reset to 0, or previous values might also be kept as a starting point.
  */
-int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
+int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps, int *bottleneck_factors) {
     int packets[MAX_NODES];
     bool transmit_intent[MAX_NODES];
     bool busy[MAX_NODES];
@@ -275,6 +277,9 @@ int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix
             for (int i = 0; i < nodes_count; i++) {
                 int parent = random_indexes[i];
                 if (busy[parent]) {
+                    if (bottleneck_factors != NULL) {
+                        bottleneck_factors[parent]++;
+                    }
                     continue;
                 }
 
@@ -332,8 +337,10 @@ int evaluate_dag_performance_up(Edge *edges, int edges_count, float **adj_matrix
     Downlink global bandwidth measurement.
 
     This method computes the number of iterations it takes to fill the packet queue of each node within the network to a given count.
+
+    @note The bottleneck_factors are not reset internally, the provided array should be manually reset to 0, or previous values might also be kept as a starting point.
  */
-int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
+int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps, int *bottleneck_factors) {
     int packets[MAX_NODES];
     bool busy[MAX_NODES];
 
@@ -400,6 +407,8 @@ int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matr
                             }
 
                             busy[parent] = true; // Mark the parent as transmitting. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
+                        } else if (bottleneck_factors != NULL) {
+                            bottleneck_factors[child]++;
                         }
                     }
                 }
@@ -433,8 +442,10 @@ int evaluate_dag_performance_down(Edge *edges, int edges_count, float **adj_matr
     Uplink and downlink simultaneous global bandwidth measurement.
 
     This method computes the number of iterations it takes to empty and fill the packet queues of each node within the network.
+
+    @note The bottleneck_factors are not reset internally, the provided array should be manually reset to 0, or previous values might also be kept as a starting point.
  */
-int evaluate_dag_performance_double_flux(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps) {
+int evaluate_dag_performance_double_flux(Edge *edges, int edges_count, float **adj_matrix, int nodes_count, int epoch_len, int packets_per_node, int max_steps, int *bottleneck_factors) {
     int packets_up[MAX_NODES];
     int packets_down[MAX_NODES];
     bool transmit_intent_up[MAX_NODES];
@@ -520,6 +531,9 @@ int evaluate_dag_performance_double_flux(Edge *edges, int edges_count, float **a
 
                 if (up_not_down) {
                     if (busy[parent]) {
+                        if (bottleneck_factors != NULL) {
+                            bottleneck_factors[parent]++;
+                        }
                         continue;
                     }
 
@@ -568,6 +582,8 @@ int evaluate_dag_performance_double_flux(Edge *edges, int edges_count, float **a
                                 }
 
                                 busy[parent] = true; // Mark the parent as busy. It is also the case when transmission success is false because it simulates a collision by the fact the child is busy.
+                            } else if (bottleneck_factors != NULL) {
+                                bottleneck_factors[child]++;
                             }
                         }
                     }
