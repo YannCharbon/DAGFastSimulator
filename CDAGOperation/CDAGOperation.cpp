@@ -921,3 +921,219 @@ void free_all_possible_tree(Edge **all_possible_trees_c, int dags_count) {
     }
     free(all_possible_trees_c);
 }
+
+Edge** generate_n_subset_dags(int n_dag, float **adj_matrix, int nodes_count, int *generated_dags_count, int skip_factor, bool test_mode, bool no_skip) {
+#if LOG_TIMINGS > 0
+    long start_time = get_microseconds();
+#endif
+
+    int nodes[MAX_NODES];
+    for (int i = 0; i < nodes_count; i++) {
+        nodes[i] = i;
+    }
+
+    bool visited[MAX_NODES];
+
+    vector<Edge> all_edges;
+    for (int i = 0; i < nodes_count; i++) {
+        for (int j = i + 1; j < nodes_count; j++) {
+            if (adj_matrix[i][j] > 0.0) {
+                Edge edge = {.parent = i, .child = j};
+                all_edges.push_back(edge);
+            }
+        }
+    }
+
+    list<vector<Edge>> all_possible_trees;
+
+    // Seed the random number generator
+    srand(time(NULL));
+
+    int n_edges = all_edges.size();
+    int k_nodes = nodes_count - 1;
+
+    if (n_edges < k_nodes) {
+#if VERBOSE >= 1
+        printf("Error: Not enough edges to connect every node. Skipping.\n");
+#endif
+        return NULL;
+    }
+
+    uint64_t total_combinations = combinations(n_edges, k_nodes);
+    CombinationIterator comb_iter(all_edges, k_nodes);
+#if LOG_TIMINGS > 0
+    long end_of_combination_computation = get_microseconds();
+    printf("C - Took %ld [us] to init and compute combinations\n", end_of_combination_computation - start_time);
+
+#endif
+#if VERBOSE >= 1
+    printf("total_combinations %ld n_edges %d k_nodes %d\n", total_combinations, n_edges, k_nodes);
+#endif
+
+    if (skip_factor == 0) {
+        // automatic mode
+        skip_factor = total_combinations / 30000000;    // This reduction factor has been verified statistically to not loose the best DAGs
+        if (skip_factor < 1) {
+            skip_factor = 1;
+        }
+#if VERBOSE >= 1
+        printf("Skip factor automatically adjusted to %d\n", skip_factor);
+#endif
+    }
+
+#if LOG_TIMINGS > 0
+    long start_of_tree_matrix_generation = get_microseconds();
+#endif
+    // Allocation done once for all
+    float *tree_matrix[nodes_count];
+    for (int i = 0; i < nodes_count; i++) {
+        tree_matrix[i] = (float *)calloc(nodes_count, sizeof(float));
+        if (tree_matrix[i] == NULL) {
+            printf("Allocation error 1\n");
+            return NULL;
+        }
+    }
+
+#if LOG_TIMINGS > 0
+    long end_of_tree_matrix_generation = get_microseconds();
+    printf("C - Took %ld [us] to generate tree matrix\n", end_of_tree_matrix_generation - start_of_tree_matrix_generation);
+
+#if LOG_TIMINGS == 2
+    long step_0, step_1, step_2, step_3, step_4, step_5, step_6, step_7;
+#endif
+    long start_of_tree_computation = get_microseconds();
+#endif
+
+    vector<Edge> tree_edges;
+    tree_edges.reserve(nodes_count - 1);  // Reserve memory once
+
+#if VERBOSE >= 2
+    long long unsigned treated = 0, last_treated_step = 0;
+#endif
+    while (comb_iter.hasNext()) {
+#if LOG_TIMINGS == 2
+        step_0 = get_microseconds();
+#endif
+        std::vector<Edge> edges = comb_iter.next();
+#if LOG_TIMINGS == 2
+        step_1 = get_microseconds();
+#endif
+
+#if VERBOSE >= 2
+        if (treated > last_treated_step + skip_factor * 10000) {
+            last_treated_step = treated;
+            printf("%llu (%llu%%)\r", treated, treated * 100 / total_combinations);
+        }
+#endif
+
+        // Equivalent of Python tree_matrix = np.zeros_like(adj_matrix)
+        //memset(tree_matrix[0], 0, sizeof(float) * nodes_count * nodes_count);
+        for (int i = 0; i < nodes_count; i++) {
+            for (int j = 0; j < nodes_count; j++) {
+                tree_matrix[i][j] = 0.0;
+            }
+        }
+
+        for (const auto& edge : edges) {
+            tree_matrix[edge.parent][edge.child] = 1.0;
+            tree_matrix[edge.child][edge.parent] = 1.0;
+        }
+#if LOG_TIMINGS == 2
+        step_2 = get_microseconds();
+#endif
+
+        memset(visited, false, nodes_count);
+
+#if LOG_TIMINGS == 2
+        step_3 = get_microseconds();
+#endif
+
+        // Check if the selected edges form a connected tree
+        dfs_tree(tree_matrix, nodes_count, visited, 0, &tree_edges);
+#if LOG_TIMINGS == 2
+        step_4 = get_microseconds();
+#endif
+        if (tree_edges.size() == nodes_count - 1 && all_values_true(visited, nodes_count)) {
+            all_possible_trees.push_back(tree_edges);
+        }
+
+        if (all_possible_trees.size() == n_dag){
+            break;
+        }
+
+        if (!no_skip){
+            // Progress with iterator by a random jump (scale by the number of nodes and number of edges)
+            int64_t total_skip = (rand() % (k_nodes * n_edges * skip_factor));
+            if (test_mode) {
+                // Deterministic behaviour
+                total_skip = (int64_t)((k_nodes * n_edges * skip_factor) / 2);
+            }
+#if VERBOSE >= 2
+            treated += total_skip;
+#endif
+#if LOG_TIMINGS == 2
+            step_5 = get_microseconds();
+#endif
+            comb_iter.skipCombinations(total_skip);
+            if (!comb_iter.hasNext()) {
+                break;
+            }
+        }
+#if VERBOSE >= 2
+        else {
+            treated++;
+        }
+#endif
+
+        tree_edges.clear();
+
+#if LOG_TIMINGS == 2
+        step_6 = get_microseconds();
+        printf("Step 1 %ld [us], Step 2 %ld [us], Step 3 %ld [us], Step 4 %ld [us], Step 5 %ld [us], Step 6 %ld [us]\n", step_1 - step_0, step_2 - step_1, step_3 - step_2, step_4 - step_3, step_5 - step_4, step_6 - step_5);
+#endif
+    }
+
+#if VERBOSE >= 2
+    printf("\n100%%\n");
+#endif
+
+#if LOG_TIMINGS > 0
+    long end_of_tree_computation = get_microseconds();
+    printf("C - Took %ld [us] to generate all dags\n", end_of_tree_computation - start_of_tree_computation);
+
+    long start_of_format_conversion = get_microseconds();
+#endif
+
+    for (int i = 0; i < nodes_count; i++) {
+        free(tree_matrix[i]);
+    }
+
+    // Convert list<vector<Edge>> to Edge[][]
+    *generated_dags_count = all_possible_trees.size();
+    auto it = all_possible_trees.begin();
+    Edge **all_possible_trees_c = (Edge **)calloc(all_possible_trees.size(), sizeof(Edge *));
+    if (all_possible_trees_c == NULL) {
+        printf("Allocation error 2\n");
+        return NULL;
+    }
+    for (int i = 0; i < all_possible_trees.size(); i++) {
+        all_possible_trees_c[i] = (Edge *)calloc(k_nodes, sizeof(Edge));
+        if (all_possible_trees_c[i] == NULL) {
+            printf("Allocation error 3\n");
+        }
+        auto edges_it = it->begin();
+        for (int j = 0; j < k_nodes; j++) {
+            memcpy(&all_possible_trees_c[i][j], &(*edges_it), sizeof(Edge));
+            edges_it++;
+        }
+        it++;
+    }
+
+#if LOG_TIMINGS > 0
+    long end_of_format_conversion = get_microseconds();
+    printf("C - Took %ld [us] to convert format\n", end_of_format_conversion - start_of_format_conversion);
+    printf("C - Total time %ld [us]\n", end_of_format_conversion - start_time);
+#endif
+
+    return all_possible_trees_c;
+}

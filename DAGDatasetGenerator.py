@@ -2,6 +2,7 @@
 Author: Yann Charbon <yann.charbon@heig-vd.ch>
 Author: Eric Tran <eric.tran@heig-vd.ch>
 """
+import multiprocessing.managers
 import numpy as np
 import networkx as nx
 from networkx.drawing.nx_agraph import graphviz_layout
@@ -13,9 +14,14 @@ import concurrent.futures
 import os
 import gc
 import heapq
+import pandas as pd
+import multiprocessing
+import math
+from itertools import combinations
 
 from pathlib import Path
 import ctypes
+
 
 # Define the C struct in ctypes
 class Edge(ctypes.Structure):
@@ -133,6 +139,7 @@ class DAGDatasetGenerator:
 
         end_time = time.time()
         print(f"Total runtime : {end_time - start_time}")
+ 
 
 
     """
@@ -331,6 +338,38 @@ class DAGDatasetGenerator:
 
         return all_possible_dags
 
+    def generate_n_subset_dags_c(self, n_dag, adj_matrix, skip_factor=0, test_mode=False, no_skip=False):
+        dll_name = "CDAGOperation/libCDAGOperation.so"
+        dllabspath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + dll_name
+        lib = ctypes.CDLL(dllabspath)
+
+        lib.generate_n_subset_dags.argtypes = (ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_float)), ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_bool, ctypes.c_bool)
+        lib.generate_n_subset_dags.restype = ctypes.POINTER(ctypes.POINTER(Edge))
+
+        lib.free_all_possible_tree.argtypes = (ctypes.POINTER(ctypes.POINTER(Edge)), ctypes.c_int)
+
+        CMatrixType = ctypes.POINTER(ctypes.c_float) * len(adj_matrix)
+        adj_matrix_c = CMatrixType(
+            *[ctypes.cast((ctypes.c_float * len(row))(*row), ctypes.POINTER(ctypes.c_float)) for row in adj_matrix]
+        )
+
+        generated_dags_count = 0
+        generated_dags_count_c = ctypes.c_int(generated_dags_count)
+
+        all_possible_dags_c = lib.generate_n_subset_dags(n_dag, adj_matrix_c, len(adj_matrix[0]), ctypes.pointer(generated_dags_count_c), skip_factor, test_mode, no_skip)
+
+        # Convert the C result back to Python list of lists
+        all_possible_dags = []
+        for i in range(generated_dags_count_c.value):
+            # Each row in `c_dag_array` is a pointer to an array of `Edge`
+            dag_size = len(adj_matrix[0]) - 1  # Based on the tree's edge count
+            dag = [(all_possible_dags_c[i][j].parent, all_possible_dags_c[i][j].child) for j in range(dag_size)]
+            all_possible_dags.append(dag)
+
+        lib.free_all_possible_tree(all_possible_dags_c, generated_dags_count_c)
+
+        return all_possible_dags
+
     """
     Python wrapper for C DAG simulation (UP/DOWN).
 
@@ -418,7 +457,6 @@ class DAGDatasetGenerator:
                 bottleneck_factors[i] = bottleneck_factors_c[i]
 
         return dag, perf
-
 
     """
     Runs the UP/DOWN simulation on each DAG to get the best performing one.
